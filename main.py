@@ -3,8 +3,6 @@ import argparse
 import json
 from pathlib import Path
 
-from train import TrainingConfig, train_autoencoder
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -31,7 +29,7 @@ def main():
                        help='K for TopK activation')
     parser.add_argument('--tied_weights', action='store_true', default=True,
                        help='Use tied encoder/decoder weights')
-    parser.add_argument('--normalize', action='store_false', 
+    parser.add_argument('--normalize', action='store_true', default=False,
                        help='Use layer normalization on inputs')
     
     # Training hyperparameters
@@ -43,6 +41,8 @@ def main():
                        help='Learning rate')
     parser.add_argument('--eps', type=float, default=6.25e-10,
                        help='Epsilon for Adam optimizer')
+    parser.add_argument('--max_grad_norm', type=float, default=1.0,
+                       help='Maximum gradient norm for clipping')
     
     # Loss coefficients
     parser.add_argument('--auxk_coef', type=float, default=1/32, 
@@ -102,38 +102,68 @@ def main():
     if args.train_path is None:
         parser.error("train_path must be specified in dataset config file")
     
-    # Create config object
-    config = TrainingConfig(
-        train_path=args.train_path,
-        val_path=args.val_path,
-        test_path=args.test_path,
-        exp_name=args.exp_name,
-        model_type=args.model,
-        n_latents=args.n_latents,
-        activation=args.activation,
-        topk_k=args.topk_k,
-        tied_weights=args.tied_weights,
-        normalize=args.normalize,
-        batch_size=args.batch_size,
-        num_epochs=args.num_epochs,
-        lr=args.lr,
-        eps=args.eps,
-        auxk_coef=args.auxk_coef,
-        auxk_k=args.auxk_k,
-        l1_coef=args.l1_coef,
-        bandwidth=args.bandwidth,
-        mono_coef=args.mono_coef,
-        mono_period=args.mono_period,
-        dead_steps_threshold=args.dead_steps_threshold,
-        dead_check_interval=args.dead_check_interval,
-        wandb_project=args.wandb_project,
-        wandb_name=args.exp_name,
-        wandb_group=args.wandb_group,
-        num_workers=args.num_workers,
-        seed=args.seed,
-        output_dir=args.output_dir,
-        device=args.device
-    )
+    # Import appropriate training module based on model type
+    if args.model == 'topk':
+        from train_topk import TrainingConfig, train_autoencoder
+        config = TrainingConfig(
+            train_path=args.train_path,
+            val_path=args.val_path,
+            test_path=args.test_path,
+            exp_name=args.exp_name,
+            n_latents=args.n_latents,
+            activation=args.activation,
+            topk_k=args.topk_k,
+            tied_weights=args.tied_weights,
+            normalize=True, #args.normalize,
+            batch_size=args.batch_size,
+            num_epochs=args.num_epochs,
+            lr=args.lr,
+            eps=args.eps,
+            auxk_coef=args.auxk_coef,
+            auxk_k=args.auxk_k,
+            mono_coef=args.mono_coef,
+            mono_period=args.mono_period,
+            dead_steps_threshold=args.dead_steps_threshold,
+            dead_check_interval=args.dead_check_interval,
+            wandb_project=args.wandb_project,
+            wandb_name=args.exp_name,
+            wandb_group=args.wandb_group,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            device=args.device
+        )
+    else:  # batch_topk, vanilla, jumprelu
+        from train_other import TrainingConfig, train_autoencoder
+        config = TrainingConfig(
+            train_path=args.train_path,
+            val_path=args.val_path,
+            test_path=args.test_path,
+            exp_name=args.exp_name,
+            model_type=args.model,
+            n_latents=args.n_latents,
+            topk_k=args.topk_k,
+            normalize=args.normalize,
+            batch_size=args.batch_size,
+            num_epochs=args.num_epochs,
+            lr=args.lr,
+            eps=args.eps,
+            max_grad_norm=args.max_grad_norm,
+            auxk_coef=args.auxk_coef,
+            auxk_k=args.auxk_k,
+            l1_coef=args.l1_coef,
+            bandwidth=args.bandwidth,
+            mono_coef=args.mono_coef,
+            mono_period=args.mono_period,
+            dead_steps_threshold=args.dead_steps_threshold,
+            wandb_project=args.wandb_project,
+            wandb_name=args.exp_name,
+            wandb_group=args.wandb_group,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            device=args.device
+        )
     
     # Save config to output directory: output_dir/exp_name
     output_path = Path(args.output_dir) / args.exp_name
@@ -151,12 +181,15 @@ def main():
     print(f"Experiment:       {config.exp_name}")
     print(f"Output directory: {output_path}")
     print(f"\nModel:")
-    print(f"  Model type:     {config.model_type}")
+    print(f"  Model type:     {getattr(config, 'model_type', 'topk')}")
     print(f"  Latents:        {config.n_latents}")
-    print(f"  Activation:     {config.activation}")
-    if config.activation == 'topk':
+    if hasattr(config, 'activation'):
+        print(f"  Activation:     {config.activation}")
+        if config.activation == 'topk':
+            print(f"  TopK K:         {config.topk_k}")
+        print(f"  Tied weights:   {config.tied_weights}")
+    else:
         print(f"  TopK K:         {config.topk_k}")
-    print(f"  Tied weights:   {config.tied_weights}")
     print(f"  Normalize:      {config.normalize}")
     print(f"\nData:")
     print(f"  Train:          {config.train_path}")
@@ -168,7 +201,12 @@ def main():
     print(f"  Batch size:     {config.batch_size}")
     print(f"  Num epochs:     {config.num_epochs}")
     print(f"  Learning rate:  {config.lr}")
-    print(f"  AuxK coef:      {config.auxk_coef}")
+    if hasattr(config, 'auxk_coef'):
+        print(f"  AuxK coef:      {config.auxk_coef}")
+    if hasattr(config, 'l1_coef') and config.l1_coef > 0:
+        print(f"  L1 coef:        {config.l1_coef}")
+    if hasattr(config, 'bandwidth'):
+        print(f"  Bandwidth:      {config.bandwidth}")
     print(f"  Mono coef:      {config.mono_coef}")
     if config.mono_coef > 0:
         if config.mono_period == 1:

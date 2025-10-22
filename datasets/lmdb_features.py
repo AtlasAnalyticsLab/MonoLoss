@@ -46,13 +46,14 @@ class LMDBFeatureDataset(Dataset):
     def __getitem__(self, idx) -> Union[np.ndarray, Tuple[np.ndarray, int]]:
         with self.env.begin() as txn:
             data = txn.get(str(idx).encode('ascii'))
-            x = np.frombuffer(data, dtype=np.float32).reshape(self.feat_shape)
+            # Make a copy to ensure the array is writable
+            x = np.frombuffer(data, dtype=np.float32).reshape(self.feat_shape).copy()
         
         # Normalize feature vector to unit norm
         norm = np.linalg.norm(x)
         if norm > 0:
             x = x / (norm + 1e-8)
-        
+        # x = x.copy()
         if self.return_index:
             return x, idx
         return x

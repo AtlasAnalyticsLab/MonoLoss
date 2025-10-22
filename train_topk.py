@@ -13,7 +13,7 @@ import numpy as np
 import wandb
 
 from datasets import LMDBFeatureDataset
-from models import TopKSAE, TopK, BatchTopKSAE, VanillaSAE, JumpReLUSAE
+from models import TopKSAE, TopK
 from loss import compute_monosemanticity_fast
 from mono_loss import compute_monosemanticity_custom
 
@@ -100,43 +100,17 @@ def evaluate(autoencoder, dataloader, config, split_name='val'):
         
         x = batch.to(config.device)
         
-        with torch.amp.autocast('cuda'):
-            # Both models now return (acts/latents_pre_act, latents, recons)
-            latents_pre_act, latents, recons = autoencoder(x)
-            
-            # Compute loss using model's compute_loss method
-            if config.model_type == 'batch_topk':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=0.0
-                )
-            elif config.model_type == 'vanilla':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=0.0
-                )
-            elif config.model_type == 'jumprelu':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=0.0
-                )
-            elif config.model_type == 'topk':
-                loss, metrics = autoencoder.compute_loss(
-                    x, latents_pre_act, latents, recons,
-                    auxk_coef=config.auxk_coef,
-                    dead_steps_threshold=dead_steps_threshold,
-                    auxk_k=config.auxk_k,
-                    mono_coef=0.0  # Don't use mono loss during evaluation
-                )
+        # TopKSAE returns (latents_pre_act, latents, recons)
+        latents_pre_act, latents, recons = autoencoder(x)
+        
+        # Compute loss using model's compute_loss method
+        loss, metrics = autoencoder.compute_loss(
+            x, latents_pre_act, latents, recons,
+            auxk_coef=config.auxk_coef,
+            dead_steps_threshold=dead_steps_threshold,
+            auxk_k=config.auxk_k,
+            mono_coef=0.0  # Don't use mono loss during evaluation
+        )
         
         total_loss += loss.item()
         total_nmse += metrics.get('nmse_loss', metrics.get('l2_loss', 0))
@@ -158,7 +132,7 @@ def evaluate(autoencoder, dataloader, config, split_name='val'):
 
 
 @torch.no_grad()
-def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12, model_type='topk'):
+def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12):
     """Compute R² (uniform average across features) over an entire dataloader.
 
     Uses a single streaming pass with sufficient statistics to avoid storing all data:
@@ -179,9 +153,8 @@ def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12, model
             batch = torch.from_numpy(batch)
         x = batch.to(device)
 
-        with torch.amp.autocast('cuda'):
-            # Both models now return (acts/latents_pre_act, latents, recons)
-            _, _, recons = autoencoder(x)
+        # TopKSAE returns (latents_pre_act, latents, recons)
+        _, _, recons = autoencoder(x)
 
         # Cast to float64 for stable accumulation
         x64 = x.to(torch.float64)
@@ -229,8 +202,7 @@ class TrainingConfig:
     exp_name: str = 'default'
 
     
-    # Model architecture
-    model_type: str = 'topk'  # 'topk' or 'batch_topk'
+    # Model architecture (TopK SAE only)
     n_latents: int = 8192
     d_model: Optional[int] = None  # Will be inferred from data
     activation: str = 'topk'  # 'relu' or 'topk'
@@ -244,11 +216,9 @@ class TrainingConfig:
     lr: float = 1e-4
     eps: float = 6.25e-10
     
-    # Loss coefficients
+    # Loss coefficients (TopK SAE specific)
     auxk_coef: float = 1/32
     auxk_k: Optional[int] = None  # If None, uses same k as topk_k
-    l1_coef: float = 0.0001  # Coefficient for L1 sparsity penalty (vanilla SAE)
-    bandwidth: float = 0.001  # Bandwidth for JumpReLU activation
     mono_coef: float = 0.0  # Coefficient for monosemanticity loss (1 - mono_score)
     mono_period: int = 1  # Compute mono loss every N steps (1=per batch, >1=full dataset every N steps)
     
@@ -270,13 +240,13 @@ class TrainingConfig:
 
 def train_autoencoder(config: TrainingConfig):
     """
-    Main training loop for sparse autoencoder.
+    Main training loop for TopK sparse autoencoder.
     
     Args:
         config: Training configuration
         
     Returns:
-        autoencoder: Trained autoencoder model
+        autoencoder: Trained TopKSAE model
     """
     
     # Construct full output path: output_dir/exp_name
@@ -367,79 +337,30 @@ def train_autoencoder(config: TrainingConfig):
     
     data_iter = cycle_dataloader(train_loader)
     
-    # Initialize model
-    print(f"Initializing {config.model_type} autoencoder: {config.n_latents} latents, {d_model} features")
+    # Initialize TopK SAE model
+    print(f"Initializing TopK SAE: {config.n_latents} latents, {d_model} features")
     
-    if config.model_type == 'batch_topk':
-        # BatchTopKSAE uses a config dictionary
-        model_cfg = {
-            'act_size': d_model,
-            'dict_size': config.n_latents,
-            'top_k': config.topk_k,
-            'l1_coeff': 0.0, 
-            'aux_penalty': config.auxk_coef,
-            'top_k_aux': config.auxk_k if config.auxk_k else config.topk_k,
-            'n_batches_to_dead': config.dead_steps_threshold // config.batch_size,
-            'seed': config.seed,
-            'device': config.device,
-            'dtype': torch.float32,
-            'input_unit_norm': config.normalize,
-        }
-        autoencoder = BatchTopKSAE(model_cfg)
-    elif config.model_type == 'vanilla':
-        # VanillaSAE uses a config dictionary
-        model_cfg = {
-            'act_size': d_model,
-            'dict_size': config.n_latents,
-            'l1_coeff': config.l1_coef,
-            'n_batches_to_dead': config.dead_steps_threshold // config.batch_size,
-            'seed': config.seed,
-            'device': config.device,
-            'dtype': torch.float32,
-            'input_unit_norm': config.normalize,
-        }
-        autoencoder = VanillaSAE(model_cfg)
-    elif config.model_type == 'jumprelu':
-        # JumpReLUSAE uses a config dictionary
-        model_cfg = {
-            'act_size': d_model,
-            'dict_size': config.n_latents,
-            'l1_coeff': config.l1_coef,
-            'bandwidth': config.bandwidth,
-            'n_batches_to_dead': config.dead_steps_threshold // config.batch_size,
-            'seed': config.seed,
-            'device': config.device,
-            'dtype': torch.float32,
-            'input_unit_norm': config.normalize,
-        }
-        autoencoder = JumpReLUSAE(model_cfg)
+    if config.activation == 'topk':
+        activation = TopK(k=config.topk_k)
     else:
-        # TopKSAE
-        if config.activation == 'topk':
-            activation = TopK(k=config.topk_k)
-        else:
-            activation = nn.ReLU()
-        
-        autoencoder = TopKSAE(
-            n_latents=config.n_latents,
-            n_inputs=d_model,
-            activation=activation,
-            tied=config.tied_weights,
-            normalize=config.normalize
-        ).to(config.device)
+        activation = nn.ReLU()
+    
+    autoencoder = TopKSAE(
+        n_latents=config.n_latents,
+        n_inputs=d_model,
+        activation=activation,
+        tied=config.tied_weights,
+        normalize=config.normalize
+    ).to(config.device)
     
     # Convert dead_steps_threshold to steps
     dead_steps_threshold_steps = config.dead_steps_threshold // config.batch_size
     
-    # Initialize decoder to unit norm (TopKSAE only, BatchTopKSAE handles this differently)
-    if config.model_type == 'topk':
-        unit_norm_decoder_(autoencoder)
+    # Initialize decoder to unit norm
+    unit_norm_decoder_(autoencoder)
     
     # Optimizer
     optimizer = torch.optim.Adam(autoencoder.parameters(), lr=config.lr, eps=config.eps)
-    
-    # Optional: AMP for mixed precision training
-    scaler = torch.amp.GradScaler('cuda')
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
@@ -471,10 +392,8 @@ def train_autoencoder(config: TrainingConfig):
             
             x = batch.to(config.device)
             
-            # Forward pass with mixed precision
-            with torch.amp.autocast('cuda'):
-                # Both models now return (acts/latents_pre_act, latents, recons)
-                latents_pre_act, latents, recons = autoencoder(x)
+            # Forward pass
+            latents_pre_act, latents, recons = autoencoder(x)
             
             # Decide mono_coef for this step
             step_mono_coef = config.mono_coef
@@ -483,49 +402,23 @@ def train_autoencoder(config: TrainingConfig):
                 step_mono_coef = 0.0  # Skip batch-level mono loss
             
             # Compute loss using model's compute_loss method
-            if config.model_type == 'batch_topk':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),  # acts for BatchTopKSAE
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=step_mono_coef
-                )
-            elif config.model_type == 'vanilla':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=step_mono_coef
-                )
-            elif config.model_type == 'jumprelu':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    mono_coef=step_mono_coef
-                )
-            elif config.model_type == 'topk':
-                loss, metrics = autoencoder.compute_loss(
-                    x.float(),
-                    latents_pre_act.float(),
-                    latents.float(),
-                    recons.float(),
-                    auxk_coef=config.auxk_coef,
-                    dead_steps_threshold=dead_steps_threshold_steps,
-                    auxk_k=config.auxk_k,
-                    mono_coef=step_mono_coef
-                    )
+            loss, metrics = autoencoder.compute_loss(
+                x.float(),
+                latents_pre_act.float(),
+                latents.float(),
+                recons.float(),
+                auxk_coef=config.auxk_coef,
+                dead_steps_threshold=dead_steps_threshold_steps,
+                auxk_k=config.auxk_k,
+                mono_coef=step_mono_coef
+            )
             
             # Backward pass
             optimizer.zero_grad()
-            scaler.scale(loss).backward()
+            loss.backward()
             
             # Periodic full-dataset mono loss via custom autograd (if enabled and it's time)
-            # Only for TopKSAE (BatchTopKSAE doesn't support mono loss yet)
-            if config.model_type == 'topk' and config.mono_coef > 0 and config.mono_period > 1 and (global_step + 1) % config.mono_period == 0:
+            if config.mono_coef > 0 and config.mono_period > 1 and (global_step + 1) % config.mono_period == 0:
                 print(f"\nComputing full dataset mono loss (custom autograd) at step {global_step + 1}...")
                 m = compute_monosemanticity_custom(autoencoder, mono_loader, device=config.device, eps=1e-8, verbose=False)
                 active_mask = (m != 0)
@@ -533,7 +426,7 @@ def train_autoencoder(config: TrainingConfig):
                 denom = max(active_count, 1)
                 # Backprop coef * (1 - mean_active(m))
                 scalar = (-config.mono_coef / denom) * m[active_mask].sum()
-                scaler.scale(scalar).backward()
+                scalar.backward()
 
                 if active_count > 0:
                     mono_mean = m[active_mask].mean().item()
@@ -549,18 +442,12 @@ def train_autoencoder(config: TrainingConfig):
                 metrics.update(mono_metrics)
                 print(f"Full dataset mono score: {mono_mean:.4f}")
             
-            # Apply decoder constraints (different for each model type)
-            if config.model_type in ['batch_topk', 'vanilla', 'jumprelu']:
-                # BatchTopKSAE, VanillaSAE, and JumpReLUSAE have their own method
-                autoencoder.make_decoder_weights_and_grad_unit_norm()
-            elif config.model_type == 'topk':
-                # TopKSAE uses these functions
-                unit_norm_decoder_(autoencoder)
-                unit_norm_decoder_grad_adjustment_(autoencoder)
+            # Apply decoder constraints for TopKSAE
+            unit_norm_decoder_(autoencoder)
+            unit_norm_decoder_grad_adjustment_(autoencoder)
             
             # Optimizer step
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             
             # Accumulate metrics
             epoch_loss += loss.item()
@@ -569,17 +456,11 @@ def train_autoencoder(config: TrainingConfig):
             num_batches += 1
             
             # Update progress bar
-            if config.model_type in ['batch_topk', 'vanilla', 'jumprelu']:
-                num_dead = (autoencoder.num_batches_not_active > autoencoder.cfg["n_batches_to_dead"]).sum().item()
-            elif config.model_type == 'topk':
-                dead_mask = autoencoder.stats_last_nonzero > dead_steps_threshold_steps
-                num_dead = dead_mask.sum().item()
+            dead_mask = autoencoder.stats_last_nonzero > dead_steps_threshold_steps
+            num_dead = dead_mask.sum().item()
             
             l0 = metrics.get('num_active', 0)
-            if config.model_type == 'topk':
-                expected_active = config.topk_k if config.activation == 'topk' else config.n_latents
-            else:
-                expected_active = config.n_latents
+            expected_active = config.topk_k if config.activation == 'topk' else config.n_latents
             
             pbar.set_postfix({
                 'loss': f"{loss.item():.4e}",
@@ -587,15 +468,14 @@ def train_autoencoder(config: TrainingConfig):
                 'dead': num_dead
             })
             
-            # Check and reinitialize dead neurons (TopKSAE only)
-            if config.model_type == 'topk':
-                if global_step > 0 and global_step % config.dead_check_interval == 0:
-                    dead_mask = autoencoder.stats_last_nonzero > dead_steps_threshold_steps
-                    num_dead = dead_mask.sum().item()
-                    
-                    if num_dead > 0:
-                        print(f"\nReinitializing {num_dead} dead neurons")
-                        reinitialize_dead_neurons(autoencoder, dead_mask, sample_batch, config.device)
+            # Check and reinitialize dead neurons
+            if global_step > 0 and global_step % config.dead_check_interval == 0:
+                dead_mask = autoencoder.stats_last_nonzero > dead_steps_threshold_steps
+                num_dead = dead_mask.sum().item()
+                
+                if num_dead > 0:
+                    print(f"\nReinitializing {num_dead} dead neurons")
+                    reinitialize_dead_neurons(autoencoder, dead_mask, sample_batch, config.device)
             
             global_step += 1
         
@@ -614,10 +494,10 @@ def train_autoencoder(config: TrainingConfig):
                   f"Val Active: {val_metrics['val_active']:.1f}")
         
         # R2 at end of epoch (train and val)
-        train_r2 = compute_r2(autoencoder, train_loader, config.device, model_type=config.model_type)
+        train_r2 = compute_r2(autoencoder, train_loader, config.device)
         print(f"Epoch {epoch+1}/{config.num_epochs} - Train R2: {train_r2:.6f}")
         if val_loader:
-            val_r2 = compute_r2(autoencoder, val_loader, config.device, model_type=config.model_type)
+            val_r2 = compute_r2(autoencoder, val_loader, config.device)
             print(f"Epoch {epoch+1}/{config.num_epochs} - Val   R2: {val_r2:.6f}")
 
         # Compute monosemanticity at end of epoch (silently)
@@ -717,7 +597,7 @@ def train_autoencoder(config: TrainingConfig):
     print("="*60)
     
     print("Computing train R2 score...")
-    train_r2_final = compute_r2(autoencoder, train_loader, config.device, model_type=config.model_type)
+    train_r2_final = compute_r2(autoencoder, train_loader, config.device)
     print(f"Train - R2: {train_r2_final:.6f}")
     final_results['train_r2'] = train_r2_final
     
@@ -726,7 +606,7 @@ def train_autoencoder(config: TrainingConfig):
     
     if val_loader:
         print("Computing val R2 score...")
-        val_r2_final = compute_r2(autoencoder, val_loader, config.device, model_type=config.model_type)
+        val_r2_final = compute_r2(autoencoder, val_loader, config.device)
         print(f"Val   - R2: {val_r2_final:.6f}")
         final_results['val_r2'] = val_r2_final
         
@@ -735,7 +615,7 @@ def train_autoencoder(config: TrainingConfig):
     
     if test_loader:
         print("Computing test R2 score...")
-        test_r2_final = compute_r2(autoencoder, test_loader, config.device, model_type=config.model_type)
+        test_r2_final = compute_r2(autoencoder, test_loader, config.device)
         print(f"Test  - R2: {test_r2_final:.6f}")
         final_results['test_r2'] = test_r2_final
         
