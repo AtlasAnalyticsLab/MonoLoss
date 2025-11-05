@@ -107,8 +107,7 @@ def compute_monosemanticity_ref(autoencoder, dataloader, device='cuda', split_na
             batch = torch.from_numpy(batch)
         x = batch.to(device)
         
-        with torch.amp.autocast(device_type=device.split(':')[0] if ':' in device else device):
-            _, latents, _ = autoencoder(x)
+        _, latents, _ = autoencoder(x)
         
         if min_vals is None:
             num_neurons = latents.shape[1]
@@ -206,8 +205,7 @@ def compute_monosemanticity_fast(autoencoder, dataloader, device='cuda', split_n
             batch = torch.from_numpy(batch)
         x = batch.to(device)
 
-        with torch.amp.autocast(device_type=device.split(':')[0] if ':' in device else device):
-            _, latents, _ = autoencoder(x)
+        _, latents, _ = autoencoder(x)
 
         if min_vals is None:
             num_neurons = latents.shape[1]
@@ -238,8 +236,7 @@ def compute_monosemanticity_fast(autoencoder, dataloader, device='cuda', split_n
             batch = torch.from_numpy(batch)
         x = batch.to(device)
 
-        with torch.amp.autocast(device_type=device.split(':')[0] if ':' in device else device):
-            _, latents, _ = autoencoder(x)
+        _, latents, _ = autoencoder(x)
 
         # Normalize activations per neuron to [0, 1]
         latents = (latents - min_vals) / (max_vals - min_vals + eps)
