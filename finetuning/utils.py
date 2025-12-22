@@ -7,7 +7,7 @@ import time
 from collections import defaultdict, deque, OrderedDict
 from typing import List, Optional, Tuple
 from PIL import Image
-import numpy as np
+import transformers
 import torch
 import torch.distributed as dist
 import glob
@@ -182,16 +182,19 @@ class FolderDatasetWithDir(torch.utils.data.Dataset):
     def __init__(self, file_pattern, transform=None):
         self.transform = transform
         self.file_paths = glob.glob(file_pattern)
-        self.file_paths = np.array(self.file_paths, dtype=np.string_) # save memory
+        # self.file_paths = np.array(self.file_paths, dtype=np.string_) # save memory
 
     def __len__(self):
         return len(self.file_paths)
 
     def __getitem__(self, idx):
-        file_path = self.file_paths[idx].decode("utf-8")
+        file_path = self.file_paths[idx]
         image = Image.open(file_path).convert("RGB")
         if self.transform:
-            image = self.transform(image)
+            if type(self.transform) is transformers.models.clip.processing_clip.CLIPProcessor:
+                image = self.transform(images=image, return_tensors="pt")["pixel_values"][0]
+            else:
+                image = self.transform(image)
         return image, file_path
 
 
