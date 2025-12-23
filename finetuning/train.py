@@ -14,6 +14,8 @@ from torch import nn
 from torch.utils.data.dataloader import default_collate
 from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
+import wandb
+from model import CustomModel
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
@@ -26,12 +28,12 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         start_time = time.time()
         image, target, feature = image.to(device), target.to(device), feature.to(device)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            output = model(image)
+            output_before_head, output_after_head = model(image)
             if args.monoloss_lambda > 0:
-                monoscore = utils.compute_monoscore(embeddings=feature, activations=output)
-                loss = criterion(output, target) - args.monoloss_lambda * monoscore.mean()
+                monoscore = utils.compute_monoscore(embeddings=feature, activations=output_before_head)
+                loss = criterion(output_after_head, target) - args.monoloss_lambda * monoscore.mean()
             else:
-                loss = criterion(output, target)
+                loss = criterion(output_after_head, target)
 
         optimizer.zero_grad()
         if scaler is not None:
@@ -54,12 +56,20 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
                 # Reset ema buffer to keep copying weights during warmup period
                 model_ema.n_averaged.fill_(0)
 
-        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+        acc1, acc5 = utils.accuracy(output_after_head, target, topk=(1, 5))
         batch_size = image.shape[0]
         metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
         metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
+
+        # log to wandb
+        wandb.log({
+            "train/loss": loss.item(),
+            "train/acc1": acc1.item(),
+            "train/acc5": acc5.item(),
+            "train/lr": optimizer.param_groups[0]["lr"],
+        })
 
 
 def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
@@ -68,16 +78,20 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     header = f"Test: {log_suffix}"
 
     num_processed_samples = 0
+    features = []
+    activations = []
     with torch.inference_mode():
         for image, target, feature in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             feature = feature.to(device, non_blocking=True)
-            output = model(image)
-            loss = criterion(output, target)
-            monoscore = utils.compute_monoscore(embeddings=feature, activations=output)
+            output_before_head, output_after_head = model(image)
+            loss = criterion(output_after_head, target)
 
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            features.append(feature)
+            activations.append(output_before_head)
+
+            acc1, acc5 = utils.accuracy(output_after_head, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
@@ -85,8 +99,13 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
             metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
             metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
             num_processed_samples += batch_size
-    # gather the stats from all processes
 
+    # Evaluate MonoScore on the whole validation set
+    features = torch.cat(features, dim=0)
+    activations = torch.cat(activations, dim=0)
+    monoscore = utils.compute_monoscore(embeddings=features, activations=activations).mean().item()
+    
+    # gather the stats from all processes
     num_processed_samples = utils.reduce_across_processes(num_processed_samples)
     if (
         hasattr(data_loader.dataset, "__len__")
@@ -104,7 +123,16 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     metric_logger.synchronize_between_processes()
 
     print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
-    return metric_logger.acc1.global_avg
+
+    # log to wandb
+    wandb.log({
+        f"val/loss": metric_logger.loss.global_avg,
+        f"val/acc1": metric_logger.acc1.global_avg,
+        f"val/acc5": metric_logger.acc5.global_avg,
+        f"val/monoscore": monoscore,
+    })
+
+    return metric_logger.acc1.global_avg, metric_logger.acc5.global_avg, monoscore
 
 
 def _get_cache_path(filepath):
@@ -278,6 +306,8 @@ def main(args):
         args.weights = None
     model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
     model.to(device)
+    # Custom model to get the output before the classification head
+    model = CustomModel(model, args)
 
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -398,7 +428,7 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         lr_scheduler.step()
-        evaluate(model, criterion, data_loader_test, device=device)
+        acc1, acc5, monoscore = evaluate(model, criterion, data_loader_test, device=device)
         if model_ema:
             evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
         if args.output_dir:
@@ -575,4 +605,9 @@ def get_args_parser(add_help=True):
 if __name__ == "__main__":
     # torch.multiprocessing.set_start_method('spawn')
     args = get_args_parser().parse_args()
+
+    # set up wandb
+    wandb.login()
+    wandb.init(project="MonoLoss_reconduct", config=args, name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}")
+
     main(args)
