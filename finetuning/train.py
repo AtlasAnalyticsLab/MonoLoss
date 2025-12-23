@@ -15,7 +15,6 @@ from torch.utils.data.dataloader import default_collate
 from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
 
-
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -23,12 +22,16 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     metric_logger.add_meter("img/s", utils.SmoothedValue(window_size=10, fmt="{value}"))
 
     header = f"Epoch: [{epoch}]"
-    for i, (image, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
+    for i, (image, target, feature) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
         start_time = time.time()
-        image, target = image.to(device), target.to(device)
+        image, target, feature = image.to(device), target.to(device), feature.to(device)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             output = model(image)
-            loss = criterion(output, target)
+            if args.monoloss_lambda > 0:
+                monoscore = utils.compute_monoscore(embeddings=feature, activations=output)
+                loss = criterion(output, target) - args.monoloss_lambda * monoscore.mean()
+            else:
+                loss = criterion(output, target)
 
         optimizer.zero_grad()
         if scaler is not None:
@@ -66,11 +69,13 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
 
     num_processed_samples = 0
     with torch.inference_mode():
-        for image, target in metric_logger.log_every(data_loader, print_freq, header):
+        for image, target, feature in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
+            feature = feature.to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
+            monoscore = utils.compute_monoscore(embeddings=feature, activations=output)
 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
@@ -136,8 +141,23 @@ def load_data(traindir, valdir, args):
         random_erase_prob = getattr(args, "random_erase", 0.0)
         ra_magnitude = getattr(args, "ra_magnitude", None)
         augmix_severity = getattr(args, "augmix_severity", None)
-        dataset = torchvision.datasets.ImageFolder(
+        # dataset = torchvision.datasets.ImageFolder(
+        #     traindir,
+        #     presets.ClassificationPresetTrain(
+        #         crop_size=train_crop_size,
+        #         interpolation=interpolation,
+        #         auto_augment_policy=auto_augment_policy,
+        #         random_erase_prob=random_erase_prob,
+        #         ra_magnitude=ra_magnitude,
+        #         augmix_severity=augmix_severity,
+        #         backend=args.backend,
+        #         use_v2=args.use_v2,
+        #     ),
+        # )
+        features = torch.load(args.pre_extracted_train_features_path, weights_only=False, map_location='cpu')
+        dataset = utils.ImageFolderWithFeatures(
             traindir,
+            features,
             presets.ClassificationPresetTrain(
                 crop_size=train_crop_size,
                 interpolation=interpolation,
@@ -178,8 +198,14 @@ def load_data(traindir, valdir, args):
                 use_v2=args.use_v2,
             )
 
-        dataset_test = torchvision.datasets.ImageFolder(
+        # dataset_test = torchvision.datasets.ImageFolder(
+        #     valdir,
+        #     preprocessing,
+        # )
+        features = torch.load(args.pre_extracted_val_features_path, weights_only=False, map_location='cpu')
+        dataset_test = utils.ImageFolderWithFeatures(
             valdir,
+            features,
             preprocessing,
         )
         if args.cache_dataset:
@@ -208,7 +234,10 @@ def main(args):
     utils.init_distributed_mode(args)
     print(args)
 
-    device = torch.device(args.device)
+    if args.distributed:
+        device = torch.device(f"cuda:{args.gpu}")
+    else:
+        device = torch.device(args.device)
 
     if args.use_deterministic_algorithms:
         torch.backends.cudnn.benchmark = False
@@ -225,10 +254,8 @@ def main(args):
         mixup_alpha=args.mixup_alpha, cutmix_alpha=args.cutmix_alpha, num_classes=num_classes, use_v2=args.use_v2
     )
     if mixup_cutmix is not None:
-
         def collate_fn(batch):
             return mixup_cutmix(*default_collate(batch))
-
     else:
         collate_fn = default_collate
 
@@ -245,6 +272,10 @@ def main(args):
     )
 
     print("Creating model")
+    if args.weights == 'pretrained':
+        args.weights = 'DEFAULT'
+    else:
+        args.weights = None
     model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
     model.to(device)
 
@@ -395,13 +426,13 @@ def get_args_parser(add_help=True):
 
     parser = argparse.ArgumentParser(description="PyTorch Classification Training", add_help=add_help)
 
-    parser.add_argument("--data-path", default="/datasets01/imagenet_full_size/061417/", type=str, help="dataset path")
-    parser.add_argument("--model", default="resnet18", type=str, help="model name")
+    parser.add_argument("--data-path", default="/dev/shm/an", type=str, help="dataset path")
+    parser.add_argument("--model", default="resnet50", type=str, help="model name")
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
-        "-b", "--batch-size", default=32, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
+        "-b", "--batch-size", default=256, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
     )
-    parser.add_argument("--epochs", default=90, type=int, metavar="N", help="number of total epochs to run")
+    parser.add_argument("--epochs", default=30, type=int, metavar="N", help="number of total epochs to run")
     parser.add_argument(
         "-j", "--workers", default=16, type=int, metavar="N", help="number of data loading workers (default: 16)"
     )
@@ -450,7 +481,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--lr-gamma", default=0.1, type=float, help="decrease lr by a factor of lr-gamma")
     parser.add_argument("--lr-min", default=0.0, type=float, help="minimum lr of lr schedule (default: 0.0)")
     parser.add_argument("--print-freq", default=10, type=int, help="print frequency")
-    parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+    parser.add_argument("--output-dir", default="/home/anhnguyen/MonoLoss/finetuning/checkpoints", type=str, help="path to save outputs")
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument(
@@ -504,7 +535,7 @@ def get_args_parser(add_help=True):
         "--interpolation", default="bilinear", type=str, help="the interpolation method (default: bilinear)"
     )
     parser.add_argument(
-        "--val-resize-size", default=256, type=int, help="the resize size used for validation (default: 256)"
+        "--val-resize-size", default=128, type=int, help="the resize size used for validation (default: 256)"
     )
     parser.add_argument(
         "--val-crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)"
@@ -517,12 +548,31 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)"
     )
-    parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights", default='pretrained', type=str, help="the weights enum name to load")
     parser.add_argument("--backend", default="PIL", type=str.lower, help="PIL or tensor - case insensitive")
     parser.add_argument("--use-v2", action="store_true", help="Use V2 transforms")
+
+    # MonoLoss configurations
+    parser.add_argument(
+        "--monoloss_lambda", "--l", default=0.0, type=float, help="the lambda value for MonoLoss (default: 0.0)"
+    )
+    parser.add_argument(
+        "--pre-extracted-train-features-path",
+        default="pre_extracted_features/imagenet_train_features_clip_vit_base_patch32.pt",
+        type=str,
+        help="path to pre-extracted training features",
+    )
+    parser.add_argument(
+        "--pre-extracted-val-features-path",
+        default="pre_extracted_features/imagenet_val_features_clip_vit_base_patch32.pt",
+        type=str,
+        help="path to pre-extracted validation features",
+    )
+
     return parser
 
 
 if __name__ == "__main__":
+    # torch.multiprocessing.set_start_method('spawn')
     args = get_args_parser().parse_args()
     main(args)

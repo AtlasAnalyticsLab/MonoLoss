@@ -9,10 +9,13 @@ from torch.utils.data import DataLoader
 import argparse
 import tqdm
 
+import os
+os.environ['HF_HOME'] = '/data/add_disk1/anhng/'
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--imagenet_root_folder", type=str, default="/project/rrg-msh/anhnguyen/imagenet",
+        "--imagenet_root_folder", type=str, default="/dev/shm/an",
         help="Path pattern to training image files."
     )
     parser.add_argument(
@@ -26,7 +29,7 @@ def parse_args():
         "--batch_size", type=int, default=512, help="Batch size for feature extraction."
     )
     parser.add_argument(
-        "--output_path", type=str, default="/home/ntanh/MonoLoss/finetuning",
+        "--output_path", type=str, default="/home/anhnguyen/MonoLoss/finetuning/pre_extracted_features",
         help="Path to save extracted features."
     )
     parser.add_argument(
@@ -70,7 +73,7 @@ def main():
     # Step 1: Load validation image file paths
     val_dataset = FolderDatasetWithDir(file_pattern=args.file_pattern, transform=preprocess)
     print(f"Found {len(val_dataset)} images for feature extraction.")
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
     # Step 3: Apply inference preprocessing transforms
     batch_size = args.batch_size
@@ -88,7 +91,7 @@ def main():
     all_features = torch.cat(all_features, dim=0)
 
     # Step 4: Save extracted features
-    output_path = f"{args.output_path}/imagenet_train_features_{args.model}.pt"
+    output_path = f"{args.output_path}/imagenet_{args.split}_features_{args.model}.pt"
     torch.save({
         'features': all_features,
         'paths': all_paths

@@ -11,6 +11,8 @@ import transformers
 import torch
 import torch.distributed as dist
 import glob
+import torchvision
+import torch.nn.functional as F
 
 class SmoothedValue:
     """Track a series of values and provide access to smoothed values over a
@@ -196,6 +198,23 @@ class FolderDatasetWithDir(torch.utils.data.Dataset):
             else:
                 image = self.transform(image)
         return image, file_path
+
+
+class ImageFolderWithFeatures(torchvision.datasets.ImageFolder):
+    def __init__(self, root, pre_extracted_features, transform=None):
+        super().__init__(root, transform=transform)
+        self.features = pre_extracted_features
+
+    def __getitem__(self, index):
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        if self.transform is not None:
+            sample = self.transform(sample)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        feature = self.features[path]
+
+        return sample, target, feature
 
 
 def accuracy(output, target, topk=(1,)):
@@ -490,3 +509,46 @@ def set_weight_decay(
         if len(params[key]) > 0:
             param_groups.append({"params": params[key], "weight_decay": params_weight_decay[key]})
     return param_groups
+
+
+def compute_monoscore(embeddings, activations):
+    min_values = activations.min(dim=0, keepdim=True)[0]
+    max_values = activations.max(dim=0, keepdim=True)[0]
+    activations = (activations - min_values) / (max_values - min_values)
+
+    device = embeddings.device
+    feature_dim = embeddings.shape[1]
+    num_neurons = activations.shape[1]
+
+    # embeddings = embeddings - embeddings.mean(dim=0, keepdim=True)
+    num_neurons = activations.shape[1]
+
+    u = torch.zeros(num_neurons, device=device, dtype=torch.float32)
+    v = torch.zeros(num_neurons, device=device, dtype=torch.float32)
+    w = torch.zeros(feature_dim, num_neurons, device=device, dtype=torch.float32)
+
+    # Unit-normalize embeddings to match cosine similarity
+    p = F.normalize(embeddings, p=2, dim=1, eps=1e-8)
+
+    # Cast to fp32 for accumulators
+    a32 = activations.float()
+    p32 = p.float()
+
+    # Update accumulators
+    u += a32.sum(dim=0)
+    v += (a32 * a32).sum(dim=0)
+    w += p32.T @ a32  # (D, B) @ (B, M) -> (D, M)
+
+    # Compute per-neuron weighted sums
+    q = (w * w).sum(dim=0)  # (M,)
+    num = 0.5 * (q - v)  # Σ_{i<j} a_i a_j cos 
+    den = 0.5 * (u * u - v)      # Σ_{i<j} a_i a_j
+
+    # Final monosemanticity scores
+    monosemanticity = torch.where(
+        den > 1e-8,
+        num / (den + 1e-12),
+        torch.zeros_like(den)
+    )
+
+    return monosemanticity
