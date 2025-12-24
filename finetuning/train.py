@@ -64,12 +64,12 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
 
         # log to wandb
-        wandb.log({
-            "train/loss": loss.item(),
-            "train/acc1": acc1.item(),
-            "train/acc5": acc5.item(),
-            "train/lr": optimizer.param_groups[0]["lr"],
-        })
+        # wandb.log({
+        #     "train/loss": loss.item(),
+        #     "train/acc1": acc1.item(),
+        #     "train/acc5": acc5.item(),
+        #     "train/lr": optimizer.param_groups[0]["lr"],
+        # })
 
 
 def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
@@ -125,12 +125,20 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
 
     # log to wandb
-    wandb.log({
-        f"val/loss": metric_logger.loss.global_avg,
-        f"val/acc1": metric_logger.acc1.global_avg,
-        f"val/acc5": metric_logger.acc5.global_avg,
-        f"val/monoscore": monoscore,
-    })
+    if log_suffix == "EMA":
+        wandb.log({
+            f"val_ema/loss": metric_logger.loss.global_avg,
+            f"val_ema/acc1": metric_logger.acc1.global_avg,
+            f"val_ema/acc5": metric_logger.acc5.global_avg,
+            f"val_ema/monoscore": monoscore,
+        })
+    else:
+        wandb.log({
+            f"val/loss": metric_logger.loss.global_avg,
+            f"val/acc1": metric_logger.acc1.global_avg,
+            f"val/acc5": metric_logger.acc5.global_avg,
+            f"val/monoscore": monoscore,
+        })
 
     return metric_logger.acc1.global_avg, metric_logger.acc5.global_avg, monoscore
 
@@ -283,7 +291,15 @@ def main(args):
     )
     if mixup_cutmix is not None:
         def collate_fn(batch):
-            return mixup_cutmix(*default_collate(batch))
+            collated = default_collate(batch)
+            # collated is (images, targets, features) when using ImageFolderWithFeatures
+            if len(collated) == 3:
+                images, targets, features = collated
+                images, targets = mixup_cutmix(images, targets)
+                return images, targets, features
+            else:
+                # Standard case with just (images, targets)
+                return mixup_cutmix(*collated)
     else:
         collate_fn = default_collate
 
