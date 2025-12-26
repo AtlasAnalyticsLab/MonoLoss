@@ -444,6 +444,10 @@ def main(args):
     # Save best checkpoint based on accuracy
     best_acc1 = 0.0
     best_acc1_ema = 0.0
+    best_acc5 = 0.0
+    best_acc5_ema = 0.0
+    best_monoscore = 0.0
+    best_monoscore_ema = 0.0
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -469,10 +473,23 @@ def main(args):
             # utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
             if acc1 > best_acc1:
                 best_acc1 = acc1
+                best_acc5 = acc5
+                best_monoscore = monoscore
                 utils.save_on_master(checkpoint, os.path.join(args.output_dir, "best_checkpoint.pth"))
             if model_ema and acc1_ema > best_acc1_ema:
                 best_acc1_ema = acc1_ema
+                best_acc5_ema = acc5_ema
+                best_monoscore_ema = monoscore_ema
                 utils.save_on_master(checkpoint, os.path.join(args.output_dir, "best_checkpoint_ema.pth"))
+    
+    wandb.log({
+        "best/acc1": best_acc1,
+        "best/acc1_ema": best_acc1_ema,
+        "best/acc5": best_acc5,
+        "best/acc5_ema": best_acc5_ema,
+        "best/monoscore": best_monoscore,
+        "best/monoscore_ema": best_monoscore_ema,
+    })
             
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
