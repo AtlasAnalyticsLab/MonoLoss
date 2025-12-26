@@ -265,6 +265,7 @@ def load_data(traindir, valdir, args):
 
 def main(args):
     if args.output_dir:
+        args.output_dir = os.path.join(args.output_dir, f"{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}")
         utils.mkdir(args.output_dir)
 
     utils.init_distributed_mode(args)
@@ -439,6 +440,11 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+
+    # Save best checkpoint based on accuracy
+    best_acc1 = 0.0
+    best_acc1_ema = 0.0
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -446,7 +452,7 @@ def main(args):
         lr_scheduler.step()
         acc1, acc5, monoscore = evaluate(model, criterion, data_loader_test, device=device)
         if model_ema:
-            evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
+            acc1_ema, acc5_ema, monoscore_ema = evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
@@ -459,9 +465,15 @@ def main(args):
                 checkpoint["model_ema"] = model_ema.state_dict()
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
-            utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
-            utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
-
+            # utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
+            # utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
+            if acc1 > best_acc1:
+                best_acc1 = acc1
+                utils.save_on_master(checkpoint, os.path.join(args.output_dir, "best_checkpoint.pth"))
+            if model_ema and acc1_ema > best_acc1_ema:
+                best_acc1_ema = acc1_ema
+                utils.save_on_master(checkpoint, os.path.join(args.output_dir, "best_checkpoint_ema.pth"))
+            
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")
