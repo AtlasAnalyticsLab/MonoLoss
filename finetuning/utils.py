@@ -204,6 +204,7 @@ class ImageFolderWithFeatures(torchvision.datasets.ImageFolder):
     def __init__(self, root, pre_extracted_features, transform=None):
         super().__init__(root, transform=transform)
         self.features = pre_extracted_features
+        self.root = root
 
     def __getitem__(self, index):
         path, target = self.samples[index]
@@ -212,6 +213,10 @@ class ImageFolderWithFeatures(torchvision.datasets.ImageFolder):
             sample = self.transform(sample)
         if self.target_transform is not None:
             target = self.target_transform(target)
+
+        # get relative path to match pre-extracted features
+        path_splits = path.split('/')
+        path = path_splits[-3] + '/' + path_splits[-2] + '/' + path_splits[-1]
         feature = self.features[path]
 
         return sample, target, feature

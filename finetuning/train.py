@@ -72,7 +72,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         # })
 
 
-def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
+def evaluate(model, criterion, data_loader, device, epoch, print_freq=100, log_suffix=""):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = f"Test: {log_suffix}"
@@ -103,7 +103,16 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     # Evaluate MonoScore on the whole validation set
     features = torch.cat(features, dim=0)
     activations = torch.cat(activations, dim=0)
-    monoscore = utils.compute_monoscore(embeddings=features, activations=activations).mean().item()
+
+    # concat all features and activations across all processes
+    all_features = [torch.zeros_like(features) for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(all_features, features)
+    all_features = torch.cat(all_features, dim=0)
+    activations_list = [torch.zeros_like(activations) for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(activations_list, activations)
+    all_activations = torch.cat(activations_list, dim=0)
+
+    monoscore = utils.compute_monoscore(embeddings=all_features, activations=all_activations).mean().item()
     
     # gather the stats from all processes
     num_processed_samples = utils.reduce_across_processes(num_processed_samples)
@@ -125,20 +134,21 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
 
     # log to wandb
-    if log_suffix == "EMA":
-        wandb.log({
-            f"val_ema/loss": metric_logger.loss.global_avg,
-            f"val_ema/acc1": metric_logger.acc1.global_avg,
-            f"val_ema/acc5": metric_logger.acc5.global_avg,
-            f"val_ema/monoscore": monoscore,
-        })
-    else:
-        wandb.log({
-            f"val/loss": metric_logger.loss.global_avg,
-            f"val/acc1": metric_logger.acc1.global_avg,
-            f"val/acc5": metric_logger.acc5.global_avg,
-            f"val/monoscore": monoscore,
-        })
+    if utils.is_main_process():
+        if log_suffix == "EMA":
+            wandb.log({
+                f"val_ema/loss": metric_logger.loss.global_avg,
+                f"val_ema/acc1": metric_logger.acc1.global_avg,
+                f"val_ema/acc5": metric_logger.acc5.global_avg,
+                f"val_ema/monoscore": monoscore,
+            }, step=epoch)
+        else:
+            wandb.log({
+                f"val/loss": metric_logger.loss.global_avg,
+                f"val/acc1": metric_logger.acc1.global_avg,
+                f"val/acc5": metric_logger.acc5.global_avg,
+                f"val/monoscore": monoscore,
+            }, step=epoch)
 
     return metric_logger.acc1.global_avg, metric_logger.acc5.global_avg, monoscore
 
@@ -271,6 +281,15 @@ def main(args):
     utils.init_distributed_mode(args)
     print(args)
 
+    # Initialize wandb only after distributed init and only on main process
+    if utils.is_main_process():
+        wandb.login()
+        wandb.init(
+            project="MonoLoss_reconduct",
+            config=args,
+            name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}"
+        )
+
     if args.distributed:
         device = torch.device(f"cuda:{args.gpu}")
     else:
@@ -311,9 +330,15 @@ def main(args):
         num_workers=args.workers,
         pin_memory=True,
         collate_fn=collate_fn,
+        persistent_workers=True,
     )
     data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=args.batch_size, sampler=test_sampler, num_workers=args.workers, pin_memory=True
+        dataset_test, 
+        batch_size=args.batch_size, 
+        sampler=test_sampler, 
+        num_workers=args.workers, 
+        pin_memory=True, 
+        persistent_workers=True
     )
 
     print("Creating model")
@@ -454,9 +479,9 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         lr_scheduler.step()
-        acc1, acc5, monoscore = evaluate(model, criterion, data_loader_test, device=device)
+        acc1, acc5, monoscore = evaluate(model, criterion, data_loader_test, epoch=epoch, device=device)
         if model_ema:
-            acc1_ema, acc5_ema, monoscore_ema = evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
+            acc1_ema, acc5_ema, monoscore_ema = evaluate(model_ema, criterion, data_loader_test, epoch=epoch, device=device, log_suffix="EMA")
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
@@ -482,15 +507,17 @@ def main(args):
                 best_monoscore_ema = monoscore_ema
                 utils.save_on_master(checkpoint, os.path.join(args.output_dir, "best_checkpoint_ema.pth"))
     
-    wandb.log({
-        "best/acc1": best_acc1,
-        "best/acc1_ema": best_acc1_ema,
-        "best/acc5": best_acc5,
-        "best/acc5_ema": best_acc5_ema,
-        "best/monoscore": best_monoscore,
-        "best/monoscore_ema": best_monoscore_ema,
-    })
-            
+    if utils.is_main_process():
+        wandb.log({
+            "best/acc1": best_acc1,
+            "best/acc1_ema": best_acc1_ema,
+            "best/acc5": best_acc5,
+            "best/acc5_ema": best_acc5_ema,
+            "best/monoscore": best_monoscore,
+            "best/monoscore_ema": best_monoscore_ema,
+        })
+        wandb.finish()
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")
@@ -633,13 +660,13 @@ def get_args_parser(add_help=True):
     )
     parser.add_argument(
         "--pre-extracted-train-features-path",
-        default="pre_extracted_features/imagenet_train_features_clip_vit_base_patch32.pt",
+        default="pre_extracted_features/imagenet_train_features_clip_vit_base_patch32_no_abs_path.pt",
         type=str,
         help="path to pre-extracted training features",
     )
     parser.add_argument(
         "--pre-extracted-val-features-path",
-        default="pre_extracted_features/imagenet_val_features_clip_vit_base_patch32.pt",
+        default="pre_extracted_features/imagenet_val_features_clip_vit_base_patch32_no_abs_path.pt",
         type=str,
         help="path to pre-extracted validation features",
     )
@@ -648,11 +675,5 @@ def get_args_parser(add_help=True):
 
 
 if __name__ == "__main__":
-    # torch.multiprocessing.set_start_method('spawn')
     args = get_args_parser().parse_args()
-
-    # set up wandb
-    wandb.login()
-    wandb.init(project="MonoLoss_reconduct", config=args, name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}")
-
     main(args)
