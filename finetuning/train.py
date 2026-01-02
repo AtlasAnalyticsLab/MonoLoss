@@ -63,14 +63,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
 
-        # log to wandb
-        # wandb.log({
-        #     "train/loss": loss.item(),
-        #     "train/acc1": acc1.item(),
-        #     "train/acc5": acc5.item(),
-        #     "train/lr": optimizer.param_groups[0]["lr"],
-        # })
-
 
 def evaluate(model, criterion, data_loader, device, epoch, print_freq=100, log_suffix=""):
     model.eval()
@@ -104,22 +96,25 @@ def evaluate(model, criterion, data_loader, device, epoch, print_freq=100, log_s
     features = torch.cat(features, dim=0)
     activations = torch.cat(activations, dim=0)
 
-    # concat all features and activations across all processes
-    all_features = [torch.zeros_like(features) for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather(all_features, features)
-    all_features = torch.cat(all_features, dim=0)
-    activations_list = [torch.zeros_like(activations) for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather(activations_list, activations)
-    all_activations = torch.cat(activations_list, dim=0)
+    # gather features/activations only when distributed is initialized
+    world_size = torch.distributed.get_world_size() if torch.distributed.is_available() and torch.distributed.is_initialized() else 1
+    if world_size > 1:
+        all_features = [torch.zeros_like(features) for _ in range(world_size)]
+        torch.distributed.all_gather(all_features, features)
+        features = torch.cat(all_features, dim=0)
+        activations_list = [torch.zeros_like(activations) for _ in range(world_size)]
+        torch.distributed.all_gather(activations_list, activations)
+        activations = torch.cat(activations_list, dim=0)
 
-    monoscore = utils.compute_monoscore(embeddings=all_features, activations=all_activations).mean().item()
+    monoscore = utils.compute_monoscore(embeddings=features, activations=activations).mean().item()
     
     # gather the stats from all processes
     num_processed_samples = utils.reduce_across_processes(num_processed_samples)
+    rank = torch.distributed.get_rank() if torch.distributed.is_available() and torch.distributed.is_initialized() else 0
     if (
         hasattr(data_loader.dataset, "__len__")
         and len(data_loader.dataset) != num_processed_samples
-        and torch.distributed.get_rank() == 0
+        and rank == 0
     ):
         # See FIXME above
         warnings.warn(
@@ -153,11 +148,11 @@ def evaluate(model, criterion, data_loader, device, epoch, print_freq=100, log_s
     return metric_logger.acc1.global_avg, metric_logger.acc5.global_avg, monoscore
 
 
-def _get_cache_path(filepath):
+def _get_cache_path(filepath, args):
     import hashlib
 
     h = hashlib.sha1(filepath.encode()).hexdigest()
-    cache_path = os.path.join("~", ".torch", "vision", "datasets", "imagefolder", h[:10] + ".pt")
+    cache_path = os.path.join("~", ".torch", "vision", "datasets", f"imagefolder_{args.model}_", h[:10] + ".pt")
     cache_path = os.path.expanduser(cache_path)
     return cache_path
 
@@ -174,7 +169,7 @@ def load_data(traindir, valdir, args):
 
     print("Loading training data")
     st = time.time()
-    cache_path = _get_cache_path(traindir)
+    cache_path = _get_cache_path(traindir, args)
     if args.cache_dataset and os.path.exists(cache_path):
         # Attention, as the transforms are also cached!
         print(f"Loading dataset_train from {cache_path}")
@@ -187,20 +182,9 @@ def load_data(traindir, valdir, args):
         random_erase_prob = getattr(args, "random_erase", 0.0)
         ra_magnitude = getattr(args, "ra_magnitude", None)
         augmix_severity = getattr(args, "augmix_severity", None)
-        # dataset = torchvision.datasets.ImageFolder(
-        #     traindir,
-        #     presets.ClassificationPresetTrain(
-        #         crop_size=train_crop_size,
-        #         interpolation=interpolation,
-        #         auto_augment_policy=auto_augment_policy,
-        #         random_erase_prob=random_erase_prob,
-        #         ra_magnitude=ra_magnitude,
-        #         augmix_severity=augmix_severity,
-        #         backend=args.backend,
-        #         use_v2=args.use_v2,
-        #     ),
-        # )
         features = torch.load(args.pre_extracted_train_features_path, weights_only=False, map_location='cpu')
+
+        # Load the dataset with pre-extracted features to compute MonoLoss
         dataset = utils.ImageFolderWithFeatures(
             traindir,
             features,
@@ -222,7 +206,7 @@ def load_data(traindir, valdir, args):
     print("Took", time.time() - st)
 
     print("Loading validation data")
-    cache_path = _get_cache_path(valdir)
+    cache_path = _get_cache_path(valdir, args)
     if args.cache_dataset and os.path.exists(cache_path):
         # Attention, as the transforms are also cached!
         print(f"Loading dataset_test from {cache_path}")
@@ -244,10 +228,6 @@ def load_data(traindir, valdir, args):
                 use_v2=args.use_v2,
             )
 
-        # dataset_test = torchvision.datasets.ImageFolder(
-        #     valdir,
-        #     preprocessing,
-        # )
         features = torch.load(args.pre_extracted_val_features_path, weights_only=False, map_location='cpu')
         dataset_test = utils.ImageFolderWithFeatures(
             valdir,
@@ -275,7 +255,7 @@ def load_data(traindir, valdir, args):
 
 def main(args):
     if args.output_dir:
-        args.output_dir = os.path.join(args.output_dir, f"{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}")
+        args.output_dir = os.path.join(args.output_dir, f"{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}")
         utils.mkdir(args.output_dir)
 
     utils.init_distributed_mode(args)
@@ -287,7 +267,7 @@ def main(args):
         wandb.init(
             project="MonoLoss_reconduct",
             config=args,
-            name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}"
+            name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}"
         )
 
     if args.distributed:
@@ -347,6 +327,7 @@ def main(args):
     else:
         args.weights = None
     model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    
     model.to(device)
     # Custom model to get the output before the classification head
     model = CustomModel(model, args)
@@ -494,8 +475,8 @@ def main(args):
                 checkpoint["model_ema"] = model_ema.state_dict()
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
-            # utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
-            # utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
+            utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
+            utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
             if acc1 > best_acc1:
                 best_acc1 = acc1
                 best_acc5 = acc5
