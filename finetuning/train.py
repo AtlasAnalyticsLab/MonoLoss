@@ -618,7 +618,7 @@ def get_args_parser(add_help=True):
         "--interpolation", default="bilinear", type=str, help="the interpolation method (default: bilinear)"
     )
     parser.add_argument(
-        "--val-resize-size", default=128, type=int, help="the resize size used for validation (default: 256)"
+        "--val-resize-size", default=256, type=int, help="the resize size used for validation (default: 256)"
     )
     parser.add_argument(
         "--val-crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)"
