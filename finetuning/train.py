@@ -3,6 +3,8 @@ import os
 import time
 import warnings
 
+from transformers import CLIPModel
+
 import presets
 import torch
 import torch.utils.data
@@ -184,6 +186,13 @@ def load_data(traindir, valdir, args):
         augmix_severity = getattr(args, "augmix_severity", None)
         features = torch.load(args.pre_extracted_train_features_path, weights_only=False, map_location='cpu')
 
+        if args.model == 'clip_vit_b_32':
+            mean = (0.48145466, 0.4578275, 0.40821073) # CLIP default mean/std
+            std = (0.26862954, 0.26130258, 0.27577711)
+        else:
+            mean = (0.485, 0.456, 0.406)               # ImageNet default mean/std
+            std = (0.229, 0.224, 0.225)
+
         # Load the dataset with pre-extracted features to compute MonoLoss
         dataset = utils.ImageFolderWithFeatures(
             traindir,
@@ -197,6 +206,8 @@ def load_data(traindir, valdir, args):
                 augmix_severity=augmix_severity,
                 backend=args.backend,
                 use_v2=args.use_v2,
+                mean=mean,
+                std=std
             ),
         )
         if args.cache_dataset:
@@ -226,6 +237,8 @@ def load_data(traindir, valdir, args):
                 interpolation=interpolation,
                 backend=args.backend,
                 use_v2=args.use_v2,
+                mean=mean,
+                std=std,
             )
 
         features = torch.load(args.pre_extracted_val_features_path, weights_only=False, map_location='cpu')
@@ -265,7 +278,7 @@ def main(args):
     if utils.is_main_process():
         wandb.login()
         wandb.init(
-            project="MonoLoss_reconduct",
+            project=args.wandb_project,
             config=args,
             name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}"
         )
@@ -326,10 +339,22 @@ def main(args):
         args.weights = 'DEFAULT'
     else:
         args.weights = None
-    model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    if args.model ==  "clip_vit_b_32":
+        from transformers import CLIPForImageClassification
+        from peft import LoraConfig, get_peft_model
+        model = CLIPForImageClassification.from_pretrained("openai/clip-vit-base-patch32")
+        peft_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"]
+        )
+        model = get_peft_model(model, peft_config).base_model.model
+    elif args.model == "resnet_50" or args.model == "vit_b_32":
+        model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    else:
+        raise ValueError(f"Model {args.model} not supported in finetuning.")
     
     model.to(device)
-    # Custom model to get the output before the classification head
     model = CustomModel(model, args)
 
     if args.distributed and args.sync_bn:
@@ -651,6 +676,8 @@ def get_args_parser(add_help=True):
         type=str,
         help="path to pre-extracted validation features",
     )
+
+    parser.add_argument("--wandb-project", default="monoloss-finetuning", type=str, help="wandb project name")  
 
     return parser
 
