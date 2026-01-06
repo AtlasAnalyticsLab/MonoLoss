@@ -16,6 +16,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
 import wandb
 from model import CustomModel
+import time
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
@@ -152,7 +153,7 @@ def _get_cache_path(filepath, args):
     import hashlib
 
     h = hashlib.sha1(filepath.encode()).hexdigest()
-    cache_path = os.path.join("~", ".torch", "vision", "datasets", f"imagefolder_{args.model}", h[:10] + ".pt")
+    cache_path = os.path.join(args.cache_dataset_path, ".torch", "vision", "datasets", f"imagefolder_{args.model}", h[:10] + ".pt")
     cache_path = os.path.expanduser(cache_path)
     return cache_path
 
@@ -266,7 +267,7 @@ def load_data(traindir, valdir, args):
 
 def main(args):
     if args.output_dir:
-        args.output_dir = os.path.join(args.output_dir, f"{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}")
+        args.output_dir = os.path.join(args.output_dir, f"{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}_{int(time.time())}")
         utils.mkdir(args.output_dir)
 
     utils.init_distributed_mode(args)
@@ -278,9 +279,9 @@ def main(args):
         wandb.init(
             project=args.wandb_project,
             config=args,
-            name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}"
+            name=f"finetune_{args.model}_l{args.monoloss_lambda}_bs{args.batch_size}_ep{args.epochs}_lr{args.lr}_{int(time.time())}"
         )
-
+    
     if args.distributed:
         device = torch.device(f"cuda:{args.gpu}")
     else:
@@ -340,11 +341,11 @@ def main(args):
     if args.model ==  "clip_vit_b_32":
         from transformers import CLIPForImageClassification
         from peft import LoraConfig, get_peft_model
-        model = CLIPForImageClassification.from_pretrained("openai/clip-vit-base-patch32")
+        model = CLIPForImageClassification.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True)
         peft_config = LoraConfig(
-            r=16,
-            lora_alpha=32,
-            target_modules=["q_proj", "v_proj"]
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            target_modules=args.lora_target_modules,
         )
         model = get_peft_model(model, peft_config).base_model.model
     elif args.model == "resnet_50" or args.model == "vit_b_32":
@@ -597,6 +598,10 @@ def get_args_parser(add_help=True):
         action="store_true",
     )
     parser.add_argument(
+        "--cache-dataset-path",
+        default="~",
+    )
+    parser.add_argument(
         "--sync-bn",
         dest="sync_bn",
         help="Use sync batch norm",
@@ -673,6 +678,20 @@ def get_args_parser(add_help=True):
         default="pre_extracted_features/imagenet_val_features_clip_vit_base_patch32_no_abs_path.pt",
         type=str,
         help="path to pre-extracted validation features",
+    )
+
+    # LoRA configurations for CLIP finetuning
+    parser.add_argument(
+        "--lora-rank", default=16, type=int, help="the rank of LoRA adapters (default: 16)"
+    )
+    parser.add_argument(
+        "--lora-alpha", default=32, type=int, help="the alpha scaling factor of LoRA adapters (default: 32)"
+    )
+    parser.add_argument(
+        "--lora-target-modules",
+        nargs='+',
+        default=["q_proj", "v_proj"],
+        help="list of target modules to apply LoRA adapters to",
     )
 
     parser.add_argument("--wandb-project", default="monoloss-finetuning", type=str, help="wandb project name")  
