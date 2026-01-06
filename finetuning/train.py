@@ -3,8 +3,6 @@ import os
 import time
 import warnings
 
-from transformers import CLIPModel
-
 import presets
 import torch
 import torch.utils.data
@@ -154,7 +152,7 @@ def _get_cache_path(filepath, args):
     import hashlib
 
     h = hashlib.sha1(filepath.encode()).hexdigest()
-    cache_path = os.path.join("~", ".torch", "vision", "datasets", f"imagefolder_{args.model}_", h[:10] + ".pt")
+    cache_path = os.path.join("~", ".torch", "vision", "datasets", f"imagefolder_{args.model}", h[:10] + ".pt")
     cache_path = os.path.expanduser(cache_path)
     return cache_path
 

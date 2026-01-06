@@ -1,4 +1,3 @@
-import torchvision
 import torch
 
 class CustomModel(torch.nn.Module):
@@ -9,11 +8,11 @@ class CustomModel(torch.nn.Module):
         if args.model == "resnet50":
             self.classifier = self.base_model.fc     # move the original head to a new attribute
             self.base_model.fc = torch.nn.Identity() # replace the original head with identity
-        elif args.model.startswith('clip_vit_'): # clip_vit
-            self.classifier = self.base_model.classifier
+        elif args.model == 'clip_vit_32': # clip_vit
+            self.classifier = torch.nn.Linear(768, 1000)
 
     def forward(self, x):
-        if self.args.model.startswith('clip_vit_'):
+        if self.args.model == 'clip_vit_32':
             outputs = self.base_model.vision_model(pixel_values=x)
             sequence_output = outputs.last_hidden_state
             output_before_head = torch.mean(sequence_output[:, 1:, :], dim=1)  # average pool the patch tokens
