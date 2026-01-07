@@ -6,10 +6,21 @@ class CustomModel(torch.nn.Module):
         self.base_model = base_model
         self.args = args
         if args.model == "resnet50":
-            self.classifier = self.base_model.fc     # move the original head to a new attribute
+            if 'imagenet' in args.data_path.lower():
+                self.classifier = self.base_model.fc     # move the original head to a new attribute
+            elif 'cifar10' in args.data_path.lower():
+                self.classifier = torch.nn.Linear(2048, 10).to(args.device)  
+            elif 'cifar100' in args.data_path.lower():
+                self.classifier = torch.nn.Linear(2048, 100).to(args.device)
             self.base_model.fc = torch.nn.Identity() # replace the original head with identity
-        elif args.model == 'clip_vit_b_32': # clip_vit
-            self.classifier = torch.nn.Linear(768, 1000).to(args.device)  # new classification head for ImageNet-1k
+
+        elif args.model == 'clip_vit_b_32': # new classification head
+            if 'imagenet' in args.data_path.lower():
+                self.classifier = torch.nn.Linear(768, 1000).to(args.device)  
+            elif 'cifar10' in args.data_path.lower():
+                self.classifier = torch.nn.Linear(768, 10).to(args.device)
+            elif 'cifar100' in args.data_path.lower():
+                self.classifier = torch.nn.Linear(768, 100).to(args.device)
 
     def forward(self, x):
         if self.args.model == 'clip_vit_b_32':

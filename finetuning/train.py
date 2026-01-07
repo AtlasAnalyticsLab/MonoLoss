@@ -294,7 +294,10 @@ def main(args):
         torch.backends.cudnn.benchmark = True
 
     train_dir = os.path.join(args.data_path, "train")
-    val_dir = os.path.join(args.data_path, "val")
+    if 'imagenet' in args.data_path.lower():
+        val_dir = os.path.join(args.data_path, "val")
+    else:
+        val_dir = os.path.join(args.data_path, "test")
     dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
 
     num_classes = len(dataset.classes)
@@ -348,8 +351,8 @@ def main(args):
             target_modules=args.lora_target_modules,
         )
         model = get_peft_model(model, peft_config).base_model.model
-    elif args.model == "resnet_50" or args.model == "vit_b_32":
-        model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    elif args.model == "resnet50" or args.model == "vit_b_32":
+        model = torchvision.models.get_model(args.model, weights=args.weights)
     else:
         raise ValueError(f"Model {args.model} not supported in finetuning.")
     
@@ -587,7 +590,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--lr-step-size", default=30, type=int, help="decrease lr every step-size epochs")
     parser.add_argument("--lr-gamma", default=0.1, type=float, help="decrease lr by a factor of lr-gamma")
     parser.add_argument("--lr-min", default=0.0, type=float, help="minimum lr of lr schedule (default: 0.0)")
-    parser.add_argument("--print-freq", default=10, type=int, help="print frequency")
+    parser.add_argument("--print-freq", default=1000, type=int, help="print frequency")
     parser.add_argument("--output-dir", default="/home/anhnguyen/MonoLoss/finetuning/checkpoints", type=str, help="path to save outputs")
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
