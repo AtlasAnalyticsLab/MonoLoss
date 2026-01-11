@@ -24,30 +24,33 @@ def compute_monosemanticity_loss_batch(x: torch.Tensor, latents: torch.Tensor,
     # Normalize activations per neuron to [0, 1] within batch
     min_acts = latents.min(dim=0, keepdim=True)[0]  # (1, M)
     max_acts = latents.max(dim=0, keepdim=True)[0]  # (1, M)
-    a = (latents - min_acts) / (max_acts - min_acts + eps)  # (B, M) this is a_tilde in the paper
+    a = (latents - min_acts) / (max_acts - min_acts + eps)  # (B, M)
     
     # Fast monosemanticity via streaming formula (same as compute_monosemanticity_fast)
     # V = X^T @ A, where rows are weighted embeddings per neuron
-    w = x_norm.T @ a  # (D, M)
+    V = x_norm.T @ a  # (D, M)
     
     # Numerator: Σ_{i<j} a_i·a_j·cos(e_i,e_j) = 0.5(||Σ a_i·e_i||² - Σ a_i²)
-    q = (w * w).sum(dim=0)  # (M,)
-    v = (a * a).sum(dim=0)  # (M,)
-    num = 0.5 * (q - v)
+    V_norm_sq = (V * V).sum(dim=0)  # (M,)
+    sum_a2 = (a * a).sum(dim=0)  # (M,)
+    weighted_cosine_sum = 0.5 * (V_norm_sq - sum_a2)
     
     # Denominator: Σ_{i<j} a_i·a_j = 0.5((Σ a_i)² - Σ a_i²)
-    u = a.sum(dim=0)  # (M,)
-    den = 0.5 * (u * u - v)
+    sum_a = a.sum(dim=0)  # (M,)
+    weight_sum = 0.5 * (sum_a * sum_a - sum_a2)
     
     # Monosemanticity score per neuron
-    mono_scores = torch.where(
-        den > eps,
-        num / (den + eps),
-        torch.zeros_like(den)
-    )  # (M,)
+    # mono_scores = torch.where(
+    #     weight_sum > eps,
+    #     weighted_cosine_sum / (weight_sum + eps),
+    #     torch.zeros_like(weight_sum)
+    # )  # (M,)
+    B = a.shape[0]  # batch size
+    num_pairs = B * (B - 1) / 2.0
+    mono_scores = weighted_cosine_sum / num_pairs
     
     # Only consider active neurons
-    active_mask = den > eps
+    active_mask = weight_sum > eps
     num_active = active_mask.sum().item()
     
     if num_active > 0:
@@ -70,95 +73,9 @@ def compute_monosemanticity_loss_batch(x: torch.Tensor, latents: torch.Tensor,
     return loss, metrics
 
 
-def compute_monosemanticity_loss_batch_ref(x: torch.Tensor,
-                                           latents: torch.Tensor,
-                                           eps: float = 1e-8,
-                                           pair_batch_size: int = 1024) -> Tuple[torch.Tensor, Dict[str, float]]:
-    """
-    Reference implementation of monosemanticity loss on a single batch via explicit pairwise accumulation.
-    This is O(B^2·M) and intended for validation against the fast formula.
-    
-    Args:
-        x: Input embeddings (B, D) - unnormalized; cosine similarity uses unit-normalized vectors
-        latents: Neuron activations (B, M) - will be scaled to [0, 1] across the batch per neuron
-        eps: Small constant for numerical stability
-        pair_batch_size: Chunk size for the inner j-loop to control memory usage
-    
-    Returns:
-        loss: 1 - mean(monosemanticity over active neurons), range [0, 1]
-        metrics: Dictionary with monosemanticity statistics
-    """
-    B = x.shape[0]
-    device = x.device
-    
-    # Normalize embeddings to unit norm for cosine similarity
-    x_norm = F.normalize(x, p=2, dim=1, eps=eps)  # (B, D)
-    
-    # Normalize activations per neuron to [0, 1] within the batch
-    min_acts = latents.min(dim=0, keepdim=True)[0]  # (1, M)
-    max_acts = latents.max(dim=0, keepdim=True)[0]  # (1, M)
-    a = (latents - min_acts) / (max_acts - min_acts + eps)  # (B, M)
-    
-    M = a.shape[1]
-    weighted_cosine_sum = torch.zeros(M, device=device, dtype=torch.float32)
-    weight_sum = torch.zeros(M, device=device, dtype=torch.float32)
-    
-    for i in range(B-1):
-        # Preload row i
-        emb_i = x_norm[i]                 # (D,)
-        act_i = a[i]                      # (M,)
-        
-        for j_start in range(i + 1, B, pair_batch_size):
-            j_end = min(j_start + pair_batch_size, B)
-            
-            emb_j = x_norm[j_start:j_end]         # (chunk, D)
-            act_j = a[j_start:j_end]              # (chunk, M)
-            
-            # Cosine similarities between i and j chunk
-            cos_ij = F.cosine_similarity(
-                emb_i.unsqueeze(0).expand(j_end - j_start, -1),  # (chunk, D)
-                emb_j,
-                dim=1
-            ).to(torch.float32)  # (chunk,)
-            
-            # Weights per neuron for each pair (i, j): a_i * a_j
-            w_ij = act_i.unsqueeze(0) * act_j  # (chunk, M)
-            
-            # Accumulate weighted cosine similarities and weights
-            weighted_cosine_sum += (w_ij * cos_ij.unsqueeze(1)).sum(dim=0)  # (M,)
-            weight_sum += w_ij.sum(dim=0)  # (M,)
-    
-    # Per-neuron monosemanticity
-    mono_scores = torch.where(
-        weight_sum > eps,
-        weighted_cosine_sum / (weight_sum + eps),
-        torch.zeros_like(weight_sum)
-    )  # (M,)
-    
-    # Consider only active neurons
-    active_mask = weight_sum > eps
-    num_active = active_mask.sum().item()
-    
-    if num_active > 0:
-        mono_mean = mono_scores[active_mask].mean()
-        mono_median = mono_scores[active_mask].median()
-    else:
-        mono_mean = torch.tensor(0.0, device=device)
-        mono_median = torch.tensor(0.0, device=device)
-    
-    loss = 1.0 - mono_mean
-    metrics = {
-        'mono_loss_val': loss.item(),
-        'mono_score': mono_mean.item(),
-        'mono_median': mono_median.item(),
-        'mono_active_neurons': num_active,
-    }
-    return loss, metrics
-
-
 @torch.no_grad()
 def compute_monosemanticity_ref(autoencoder, dataloader, device='cuda', split_name='val', 
-                                pair_batch_size: int = 128, eps: float = 1e-8, verbose: bool = False):
+                                pair_batch_size: int = 100, eps: float = 1e-8, verbose: bool = False):
     """
     Reference MonoScore implementation using explicit nested loops over all pairs.
     
@@ -248,11 +165,13 @@ def compute_monosemanticity_ref(autoencoder, dataloader, device='cuda', split_na
             weight_sum += weights.sum(dim=0)  # (M,)
     
     # Compute final monosemanticity scores
-    monosemanticity = torch.where(
-        weight_sum > eps,
-        weighted_cosine_similarity_sum / weight_sum,
-        torch.zeros_like(weight_sum)  
-    )
+    # monosemanticity = torch.where(
+    #     weight_sum > eps,
+    #     weighted_cosine_similarity_sum / weight_sum,
+    #     torch.zeros_like(weight_sum)  
+    # )
+    num_pairs = num_images * (num_images - 1) / 2.0
+    monosemanticity = weighted_cosine_similarity_sum / num_pairs
     
     autoencoder.train()
     return monosemanticity
@@ -313,9 +232,9 @@ def compute_monosemanticity_fast(autoencoder, dataloader, device='cuda', split_n
     if verbose:
         print(f"Second pass: streaming accumulators...")
     # Accumulators in FP32 for numerical stability
-    u = torch.zeros(num_neurons, device=device, dtype=torch.float32)
-    v = torch.zeros(num_neurons, device=device, dtype=torch.float32)
-    w = torch.zeros(feature_dim, num_neurons, device=device, dtype=torch.float32)
+    sum_a = torch.zeros(num_neurons, device=device, dtype=torch.float32)
+    sum_a2 = torch.zeros(num_neurons, device=device, dtype=torch.float32)
+    V = torch.zeros(feature_dim, num_neurons, device=device, dtype=torch.float32)
 
     for batch in tqdm(dataloader, desc=f"Accumulating {split_name}", disable=not verbose):
         if not isinstance(batch, torch.Tensor):
@@ -336,20 +255,22 @@ def compute_monosemanticity_fast(autoencoder, dataloader, device='cuda', split_n
         p32 = p.float()
 
         # Update accumulators
-        u += a32.sum(dim=0)
-        v += (a32 * a32).sum(dim=0)
-        w += p32.T @ a32  # (D, B) @ (B, M) -> (D, M)
+        sum_a += a32.sum(dim=0)
+        sum_a2 += (a32 * a32).sum(dim=0)
+        V += p32.T @ a32  # (D, B) @ (B, M) -> (D, M)
 
     # Compute per-neuron weighted sums
-    q = (w * w).sum(dim=0)  # (M,)
-    num = 0.5 * (q - v)  # Σ_{i<j} a_i a_j cos 
-    den = 0.5 * (u * u - v)      # Σ_{i<j} a_i a_j
+    V_norm_sq = (V * V).sum(dim=0)  # (M,)
+    weighted_cosine_sum = 0.5 * (V_norm_sq - sum_a2)  # Σ_{i<j} a_i a_j cos 
+    weight_sum = 0.5 * (sum_a * sum_a - sum_a2)      # Σ_{i<j} a_i a_j
 
     # Final monosemanticity scores
-    monosemanticity = torch.where(
-        den > 1e-8,
-        num / (den + 1e-12),
-        torch.zeros_like(den)
-    )
+    # monosemanticity = torch.where(
+    #     weight_sum > 1e-8,
+    #     weighted_cosine_sum / (weight_sum + 1e-12),
+    #     torch.zeros_like(weight_sum)
+    # )
+    num_pairs = dataset_size * (dataset_size - 1) / 2.0
+    monosemanticity = weighted_cosine_sum / num_pairs
     autoencoder.train()
     return monosemanticity
