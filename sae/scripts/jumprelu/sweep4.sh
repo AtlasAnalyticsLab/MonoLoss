@@ -1,0 +1,7 @@
+#!/bin/bash
+
+python main.py --dataset_config config/open_images_clip_image.json --wandb_project monoloss --wandb_group jumprelu_hyperparams --n_latents 8192 --batch_size 2048 --num_epochs 50 --mono_period 1 --mono_coef 0 --model jumprelu --l1_coef 0.001 --bandwidth 0.0003 --normalize --exp_name jumprelu_l1_0.001_bw_0.0003
+python main.py --dataset_config config/open_images_clip_image.json --wandb_project monoloss --wandb_group jumprelu_hyperparams --n_latents 8192 --batch_size 2048 --num_epochs 50 --mono_period 1 --mono_coef 0 --model jumprelu --l1_coef 0.001 --bandwidth 0.001 --normalize --exp_name jumprelu_l1_0.001_bw_0.001
+python main.py --dataset_config config/open_images_clip_image.json --wandb_project monoloss --wandb_group jumprelu_hyperparams --n_latents 8192 --batch_size 2048 --num_epochs 50 --mono_period 1 --mono_coef 0 --model jumprelu --l1_coef 0.001 --bandwidth 0.003 --normalize --exp_name jumprelu_l1_0.001_bw_0.003
+python main.py --dataset_config config/open_images_clip_image.json --wandb_project monoloss --wandb_group jumprelu_hyperparams --n_latents 8192 --batch_size 2048 --num_epochs 50 --mono_period 1 --mono_coef 0 --model jumprelu --l1_coef 0.001 --bandwidth 0.01 --normalize --exp_name jumprelu_l1_0.001_bw_0.01
+python main.py --dataset_config config/open_images_clip_image.json --wandb_project monoloss --wandb_group jumprelu_hyperparams --n_latents 8192 --batch_size 2048 --num_epochs 50 --mono_period 1 --mono_coef 0 --model jumprelu --l1_coef 0.001 --bandwidth 0.03 --normalize --exp_name jumprelu_l1_0.001_bw_0.03
