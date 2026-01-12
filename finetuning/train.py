@@ -174,6 +174,7 @@ def load_data(traindir, valdir, args):
     if args.cache_dataset and os.path.exists(cache_path):
         # Attention, as the transforms are also cached!
         print(f"Loading dataset_train from {cache_path}")
+        print("WARNING: the cached dataset transform will be used!")
         # TODO: this could probably be weights_only=True
         dataset, _ = torch.load(cache_path, weights_only=False)
     else:
@@ -342,22 +343,22 @@ def main(args):
     else:
         args.weights = None
     if args.model ==  "clip_vit_b_32":
-        from transformers import CLIPForImageClassification
+        from transformers import CLIPModel
         from peft import LoraConfig, get_peft_model
-        model = CLIPForImageClassification.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True)
+        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True).vision_model
         peft_config = LoraConfig(
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             target_modules=args.lora_target_modules,
         )
-        model = get_peft_model(model, peft_config).base_model.model
+        model = get_peft_model(model, peft_config)
     elif args.model == "resnet50" or args.model == "vit_b_32":
         model = torchvision.models.get_model(args.model, weights=args.weights)
     else:
         raise ValueError(f"Model {args.model} not supported in finetuning.")
     
-    model.to(device)
     model = CustomModel(model, args)
+    model.to(device)
 
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -450,7 +451,7 @@ def main(args):
         model_ema = utils.ExponentialMovingAverage(model_without_ddp, device=device, decay=1.0 - alpha)
 
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=True)
+        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
         model_without_ddp.load_state_dict(checkpoint["model"])
         if not args.test_only:
             optimizer.load_state_dict(checkpoint["optimizer"])
@@ -672,13 +673,13 @@ def get_args_parser(add_help=True):
     )
     parser.add_argument(
         "--pre-extracted-train-features-path",
-        default="pre_extracted_features/imagenet_train_features_clip_vit_base_patch32_no_abs_path.pt",
+        default="pre_extracted_features_norm/imagenet_train_features_clip_vit_base_patch32_no_abs_path.pt",
         type=str,
         help="path to pre-extracted training features",
     )
     parser.add_argument(
         "--pre-extracted-val-features-path",
-        default="pre_extracted_features/imagenet_val_features_clip_vit_base_patch32_no_abs_path.pt",
+        default="pre_extracted_features_norm/imagenet_val_features_clip_vit_base_patch32_no_abs_path.pt",
         type=str,
         help="path to pre-extracted validation features",
     )
@@ -704,4 +705,5 @@ def get_args_parser(add_help=True):
 
 if __name__ == "__main__":
     args = get_args_parser().parse_args()
+    print(args.output_dir)
     main(args)
