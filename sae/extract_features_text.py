@@ -381,12 +381,8 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--max_length', type=int, default=256,
                        help='Max sequence length for tokenization')
-    parser.add_argument('--start_index', type=int, default=0,
-                       help='Start index for dataset slicing (for splitting into parts)')
     parser.add_argument('--max_samples', type=int, default=None,
                        help='Maximum number of samples to process')
-    parser.add_argument('--part_suffix', type=str, default=None,
-                       help='Suffix to add to output filename (e.g., "_part1")')
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--map_size_gb', type=int, default=100,
                        help='LMDB map size in GB')
@@ -415,9 +411,6 @@ def main():
     else:
         output_name = model_tag
 
-    # Add part suffix if specified
-    if args.part_suffix:
-        output_name = f"{output_name}{args.part_suffix}"
     output_path = os.path.join(args.output_dir, dataset_name, f"{output_name}.lmdb")
     print(f"Output: {output_path}")
 
@@ -450,17 +443,6 @@ def main():
         # HuggingFace dataset
         ds = load_hf_dataset(args.hf_dataset, cache_dir=os.environ.get('HF_DATASETS_CACHE'))
         total_samples = len(ds)
-
-        # Apply slicing if start_index or max_samples specified
-        end_index = total_samples
-        if args.start_index > 0 or args.max_samples is not None:
-            start = args.start_index
-            if args.max_samples is not None:
-                end_index = min(start + args.max_samples, total_samples)
-            ds = ds.select(range(start, end_index))
-            total_samples = len(ds)
-            print(f"Processing slice [{start}:{end_index}] = {total_samples:,} samples")
-
         text_iter = (ex[args.text_field] for ex in ds)
 
     write_to_lmdb(
