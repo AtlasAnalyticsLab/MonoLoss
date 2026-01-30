@@ -352,8 +352,10 @@ def main(args):
             target_modules=args.lora_target_modules,
         )
         model = get_peft_model(model, peft_config)
+        args.model_dim = 768  # CLIP ViT-B/32 hidden size
     elif args.model == "resnet50" or args.model == "vit_b_32":
         model = torchvision.models.get_model(args.model, weights=args.weights)
+        args.model_dim = 2048
     else:
         raise ValueError(f"Model {args.model} not supported in finetuning.")
     
@@ -699,6 +701,12 @@ def get_args_parser(add_help=True):
     )
 
     parser.add_argument("--wandb-project", default="monoloss-finetuning", type=str, help="wandb project name")  
+
+    # intermediate layer
+    parser.add_argument("--intermediate-layer", action='store_true', help="whether to use intermediate layer")
+    parser.add_argument("--ex-factor", default=1, type=int, help="intermediate layer expansion factor (default: 1)")
+    parser.add_argument("--act-type", default='topk', type=str, help="intermediate layer activation function (default: topk)")
+    parser.add_argument("--k", default=16, type=int, help="intermediate layer scaling factor (default: 1)")  
 
     return parser
 
