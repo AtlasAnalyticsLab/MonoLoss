@@ -30,10 +30,10 @@ def main():
     parser.add_argument('--tied_weights', action='store_true', default=True,
                        help='Use tied encoder/decoder weights')
     parser.add_argument('--normalize', action='store_true', default=False,
-                       help='Use layer normalization on inputs')
+                       help='Normalize inputs to zero mean, unit variance')
     
     # Training hyperparameters
-    parser.add_argument('--batch_size', type=int, default=256, 
+    parser.add_argument('--batch_size', type=int, default=2048, 
                        help='Batch size for training')
     parser.add_argument('--num_epochs', type=int, default=50, 
                        help='Number of training epochs')
@@ -50,7 +50,7 @@ def main():
     parser.add_argument('--auxk_k', type=int, default=None,
                        help='K for auxiliary TopK (if None, uses same as topk_k)')
     parser.add_argument('--l1_coef', type=float, default=0.0001,
-                       help='Coefficient for L1 sparsity penalty (vanilla SAE)')
+                       help='Coefficient for L1 sparsity (vanilla) or L0 sparsity (jumprelu)')
     parser.add_argument('--bandwidth', type=float, default=0.001,
                        help='Bandwidth for JumpReLU activation (smoothness of threshold)')
     parser.add_argument('--mono_coef', type=float, default=0.0,
@@ -62,7 +62,7 @@ def main():
     parser.add_argument('--dead_steps_threshold', type=int, default=10_000_000, 
                        help='Steps threshold for considering a neuron dead')
     parser.add_argument('--dead_check_interval', type=int, default=1000,
-                       help='Check for dead neurons every N steps')
+                       help='Check for dead neurons every N steps (topk model only)')
     
     # Logging
     parser.add_argument('--wandb_project', type=str, default=None, 
