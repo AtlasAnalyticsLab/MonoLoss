@@ -1,0 +1,5 @@
+{
+  "train_path": "/media/ali/Elements/MonoLoss_features/imagenet/train/dino_features_dinov2-large.lmdb",
+  "val_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/dino_features_dinov2-large.lmdb",
+  "test_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/dino_features_dinov2-large.lmdb"
+}

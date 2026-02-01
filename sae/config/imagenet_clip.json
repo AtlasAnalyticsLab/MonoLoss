@@ -1,0 +1,5 @@
+{
+  "train_path": "/media/ali/Elements/MonoLoss_features/imagenet/train/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb",
+  "val_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb",
+  "test_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb"
+}

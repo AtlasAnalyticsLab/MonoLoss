@@ -1,0 +1,6 @@
+{
+  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/qwen_text_features_Qwen3-Embedding-0.6B_fast.lmdb",
+  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/qwen_text_features_Qwen3-Embedding-0.6B_fast.lmdb",
+  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/qwen_text_features_Qwen3-Embedding-0.6B_fast.lmdb"
+}
+

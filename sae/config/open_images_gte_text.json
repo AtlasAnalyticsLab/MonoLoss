@@ -1,0 +1,6 @@
+{
+  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/gte_text_features_gte-large_fast.lmdb",
+  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/gte_text_features_gte-large_fast.lmdb",
+  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/gte_text_features_gte-large_fast.lmdb"
+}
+

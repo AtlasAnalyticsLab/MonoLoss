@@ -1,0 +1,5 @@
+{
+  "train_path": "/media/ali/Elements/MonoLoss_features/imagenet/train/vit_features_vit-large-p16-224.lmdb",
+  "val_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/vit_features_vit-large-p16-224.lmdb",
+  "test_path": "/media/ali/Elements/MonoLoss_features/imagenet/validation/vit_features_vit-large-p16-224.lmdb"
+}

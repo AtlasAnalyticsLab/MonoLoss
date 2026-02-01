@@ -95,7 +95,28 @@ def load_hf_dataset(dataset_path: str, split: str = 'train', cache_dir: str = No
     # Remove current dir from path to avoid local datasets module
     script_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path = [p for p in sys.path if p != script_dir and p != '']
-    from datasets import load_dataset
+    from datasets import load_dataset, Dataset
+    import pyarrow as pa
+
+    # Try direct Arrow loading first (bypasses HF caching issues)
+    if cache_dir:
+        dataset_name = os.path.basename(dataset_path.rstrip('/'))
+        cache_base = os.path.join(cache_dir, dataset_name, 'default', '0.0.0')
+        if os.path.exists(cache_base):
+            for entry in sorted(os.listdir(cache_base)):
+                entry_path = os.path.join(cache_base, entry)
+                if os.path.isdir(entry_path) and not entry.endswith('.incomplete'):
+                    arrow_files = sorted([f for f in os.listdir(entry_path) if f.endswith('.arrow')])
+                    if arrow_files:
+                        print(f"Loading from cached Arrow files: {entry_path} ({len(arrow_files)} shards)")
+                        arrow_paths = [os.path.join(entry_path, af) for af in arrow_files]
+                        ds = Dataset.from_file(arrow_paths[0])
+                        if len(arrow_paths) > 1:
+                            from datasets import concatenate_datasets
+                            datasets_list = [Dataset.from_file(p) for p in tqdm(arrow_paths, desc="Loading shards")]
+                            ds = concatenate_datasets(datasets_list)
+                        print(f"Dataset loaded: {len(ds):,} samples")
+                        return ds
 
     print(f"Loading HuggingFace dataset from {dataset_path}...")
     ds = load_dataset(
@@ -383,8 +404,12 @@ def main():
                        help='Max sequence length for tokenization')
     parser.add_argument('--max_samples', type=int, default=None,
                        help='Maximum number of samples to process')
+    parser.add_argument('--num_parts', type=int, default=None,
+                       help='Split dataset into N parts (use with --part_id)')
+    parser.add_argument('--part_id', type=int, default=None,
+                       help='Which part to process (1-indexed, use with --num_parts)')
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--map_size_gb', type=int, default=100,
+    parser.add_argument('--map_size_gb', type=int, default=300,
                        help='LMDB map size in GB')
 
     args = parser.parse_args()
@@ -394,6 +419,8 @@ def main():
         parser.error("Must specify either --input_dir or --hf_dataset")
     if args.input_dir is not None and args.hf_dataset is not None:
         parser.error("Specify only one of --input_dir or --hf_dataset")
+    if (args.num_parts is None) != (args.part_id is None):
+        parser.error("--num_parts and --part_id must be used together")
 
     # Infer dataset name
     if args.dataset_name:
@@ -411,6 +438,9 @@ def main():
     else:
         output_name = model_tag
 
+    # Add part suffix if processing in parts
+    if args.part_id is not None:
+        output_name = f"{output_name}_part{args.part_id}"
     output_path = os.path.join(args.output_dir, dataset_name, f"{output_name}.lmdb")
     print(f"Output: {output_path}")
 
@@ -443,6 +473,26 @@ def main():
         # HuggingFace dataset
         ds = load_hf_dataset(args.hf_dataset, cache_dir=os.environ.get('HF_DATASETS_CACHE'))
         total_samples = len(ds)
+
+        # Apply partitioning if num_parts and part_id specified
+        if args.num_parts is not None and args.part_id is not None:
+            if args.part_id < 1 or args.part_id > args.num_parts:
+                raise ValueError(f"part_id must be between 1 and {args.num_parts}")
+
+            # Calculate start and end indices for this part
+            base_size = total_samples // args.num_parts
+            remainder = total_samples % args.num_parts
+
+            # Distribute remainder across first 'remainder' parts
+            start = 0
+            for i in range(1, args.part_id):
+                start += base_size + (1 if i <= remainder else 0)
+            end = start + base_size + (1 if args.part_id <= remainder else 0)
+
+            ds = ds.select(range(start, end))
+            total_samples = len(ds)
+            print(f"Processing part {args.part_id}/{args.num_parts}: [{start}:{end}] = {total_samples:,} samples")
+
         text_iter = (ex[args.text_field] for ex in ds)
 
     write_to_lmdb(

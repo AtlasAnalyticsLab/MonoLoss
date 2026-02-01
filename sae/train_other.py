@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 import wandb
 
-from datasets import LMDBFeatureDataset
+from dataset import LMDBFeatureDataset
+from dataset.samplers import ContiguousBatchSampler
 from models import BatchTopKSAE, VanillaSAE, JumpReLUSAE
 from loss import compute_monosemanticity_fast
 from mono_loss import compute_monosemanticity_custom
@@ -22,13 +23,13 @@ from mono_loss import compute_monosemanticity_custom
 def evaluate(autoencoder, dataloader, config, split_name='val'):
     """Evaluate autoencoder on a dataset."""
     autoencoder.eval()
-    
+
     total_loss = 0
     total_l2 = 0
     total_active = 0
     num_batches = 0
-    
-    for batch in dataloader:
+
+    for batch in tqdm(dataloader, desc=f"Evaluating {split_name}"):
         if not isinstance(batch, torch.Tensor):
             batch = torch.from_numpy(batch)
         
@@ -65,7 +66,7 @@ def evaluate(autoencoder, dataloader, config, split_name='val'):
 
 
 @torch.no_grad()
-def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12):
+def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12, split_name='data'):
     """Compute R² (uniform average across features) over an entire dataloader.
 
     Uses a single streaming pass with sufficient statistics to avoid storing all data:
@@ -81,7 +82,7 @@ def compute_r2(autoencoder, dataloader, device='cuda', eps: float = 1e-12):
 
     autoencoder.eval()
 
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc=f"Computing R2 {split_name}"):
         if not isinstance(batch, torch.Tensor):
             batch = torch.from_numpy(batch)
         x = batch.to(device)
@@ -205,27 +206,39 @@ def train_autoencoder(config: TrainingConfig):
     config.d_model = d_model
     print(f"Feature dimension: {d_model}")
     
-    # Create train dataloader
+    # Create train dataloader with contiguous batch sampling for faster LMDB reads
+    train_batch_sampler = ContiguousBatchSampler(
+        n_samples=len(train_dataset),
+        batch_size=config.batch_size,
+        drop_last=True,
+        shuffle=True
+    )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
+        batch_sampler=train_batch_sampler,
         num_workers=config.num_workers,
         pin_memory=True,
-        drop_last=True
+        persistent_workers=config.num_workers > 0,
+        prefetch_factor=4 if config.num_workers > 0 else None
     )
     
-    # Create separate non-shuffled dataloader for mono loss computation (if needed)
+    # Create separate dataloader for mono loss computation (if needed)
     mono_loader = None
     if config.mono_coef > 0 and config.mono_period > 1:
         print(f"Creating separate DataLoader for periodic mono loss computation...")
+        mono_batch_sampler = ContiguousBatchSampler(
+            n_samples=len(train_dataset),
+            batch_size=config.batch_size,
+            drop_last=False,  # Include all samples
+            shuffle=True
+        )
         mono_loader = DataLoader(
             train_dataset,
-            batch_size=config.batch_size,
-            shuffle=True,
+            batch_sampler=mono_batch_sampler,
             num_workers=config.num_workers,
             pin_memory=True,
-            drop_last=False  # Include all samples
+            persistent_workers=config.num_workers > 0,
+            prefetch_factor=4 if config.num_workers > 0 else None
         )
     
     # Load val dataset if provided
@@ -234,13 +247,19 @@ def train_autoencoder(config: TrainingConfig):
         print(f"Loading val dataset from {config.val_path}...")
         val_dataset = LMDBFeatureDataset(config.val_path, return_index=False, verbose=False)
         
+        val_batch_sampler = ContiguousBatchSampler(
+            n_samples=len(val_dataset),
+            batch_size=config.batch_size,
+            drop_last=False,
+            shuffle=False  # Sequential for evaluation
+        )
         val_loader = DataLoader(
             val_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
+            batch_sampler=val_batch_sampler,
             num_workers=config.num_workers,
             pin_memory=True,
-            drop_last=False
+            persistent_workers=config.num_workers > 0,
+            prefetch_factor=4 if config.num_workers > 0 else None
         )
         print(f"Val dataset: {len(val_dataset)} samples")
     
@@ -250,13 +269,19 @@ def train_autoencoder(config: TrainingConfig):
         print(f"Loading test dataset from {config.test_path}...")
         test_dataset = LMDBFeatureDataset(config.test_path, return_index=False, verbose=False)
         
+        test_batch_sampler = ContiguousBatchSampler(
+            n_samples=len(test_dataset),
+            batch_size=config.batch_size,
+            drop_last=False,
+            shuffle=False  # Sequential for evaluation
+        )
         test_loader = DataLoader(
             test_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
+            batch_sampler=test_batch_sampler,
             num_workers=config.num_workers,
             pin_memory=True,
-            drop_last=False
+            persistent_workers=config.num_workers > 0,
+            prefetch_factor=4 if config.num_workers > 0 else None
         )
         print(f"Test dataset: {len(test_dataset)} samples")
     
@@ -415,9 +440,20 @@ def train_autoencoder(config: TrainingConfig):
         avg_loss = epoch_loss / num_batches
         avg_l2 = epoch_l2 / num_batches
         avg_active = epoch_active / num_batches
-        
+
         print(f"Epoch {epoch+1}/{config.num_epochs} - Train Loss: {avg_loss:.4e}, Train L2: {avg_l2:.4e}, Train Active: {avg_active:.1f}")
-        
+
+        # # Save checkpoint immediately after training (before evaluations)
+        # checkpoint_path = Path(config.output_dir) / f'autoencoder_epoch{epoch+1}.pt'
+        # torch.save({
+        #     'epoch': epoch + 1,
+        #     'step': global_step,
+        #     'model_state_dict': autoencoder.state_dict(),
+        #     'optimizer_state_dict': optimizer.state_dict(),
+        #     'config': vars(config),
+        # }, checkpoint_path)
+        # print(f"Checkpoint saved to {checkpoint_path}")
+
         # Validation at end of epoch
         if val_loader:
             val_metrics = evaluate(autoencoder, val_loader, config, 'val')
@@ -426,13 +462,13 @@ def train_autoencoder(config: TrainingConfig):
                   f"Val Active: {val_metrics['val_active']:.1f}")
         
         # R2 at end of epoch (train and val)
-        train_r2 = compute_r2(autoencoder, train_loader, config.device)
+        train_r2 = compute_r2(autoencoder, train_loader, config.device, split_name='train')
         print(f"Epoch {epoch+1}/{config.num_epochs} - Train R2: {train_r2:.6f}")
         if val_loader:
-            val_r2 = compute_r2(autoencoder, val_loader, config.device)
+            val_r2 = compute_r2(autoencoder, val_loader, config.device, split_name='val')
             print(f"Epoch {epoch+1}/{config.num_epochs} - Val   R2: {val_r2:.6f}")
 
-        # Compute monosemanticity at end of epoch (silently)
+        # Compute monosemanticity at end of epoch
         train_mono = compute_monosemanticity_fast(autoencoder, train_loader, config.device, 'train', verbose=False)
         train_mono_np = train_mono.cpu().numpy()
         train_mono_mean = np.mean(train_mono_np)
@@ -529,25 +565,25 @@ def train_autoencoder(config: TrainingConfig):
     print("="*60)
     
     print("Computing train R2 score...")
-    train_r2_final = compute_r2(autoencoder, train_loader, config.device)
+    train_r2_final = compute_r2(autoencoder, train_loader, config.device, split_name='train')
     print(f"Train - R2: {train_r2_final:.6f}")
     final_results['train_r2'] = train_r2_final
-    
+
     if config.wandb_project:
         wandb.log({'final_train_r2': train_r2_final})
-    
+
     if val_loader:
         print("Computing val R2 score...")
-        val_r2_final = compute_r2(autoencoder, val_loader, config.device)
+        val_r2_final = compute_r2(autoencoder, val_loader, config.device, split_name='val')
         print(f"Val   - R2: {val_r2_final:.6f}")
         final_results['val_r2'] = val_r2_final
-        
+
         if config.wandb_project:
             wandb.log({'final_val_r2': val_r2_final})
-    
+
     if test_loader:
         print("Computing test R2 score...")
-        test_r2_final = compute_r2(autoencoder, test_loader, config.device)
+        test_r2_final = compute_r2(autoencoder, test_loader, config.device, split_name='test')
         print(f"Test  - R2: {test_r2_final:.6f}")
         final_results['test_r2'] = test_r2_final
         

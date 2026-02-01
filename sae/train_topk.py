@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 import wandb
 
-from datasets import LMDBFeatureDataset
+from dataset import LMDBFeatureDataset
 from models import TopKSAE, TopK
 from loss import compute_monosemanticity_fast
 from mono_loss import compute_monosemanticity_custom

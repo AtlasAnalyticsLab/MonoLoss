@@ -1,17 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=extract_pythia
 #SBATCH --account=rrg-msh
-#SBATCH --time=7-00:00:00
+#SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=1
-#SBATCH --output=/home/anasiri/links/scratch/slurm_logs/%x_%j.out
-#SBATCH --error=/home/anasiri/links/scratch/slurm_logs/%x_%j.err
+#SBATCH --output=/home/anasiri/links/scratch/slurm_logs/%x_%A_%a.out
+#SBATCH --error=/home/anasiri/links/scratch/slurm_logs/%x_%A_%a.err
+#SBATCH --array=1-5
 
 # Print job info
 echo "Job started at: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
+echo "Array Task ID: $SLURM_ARRAY_TASK_ID"
 echo "Node: $SLURM_NODELIST"
-echo "Working directory: $(pwd)"
 echo ""
 
 # HuggingFace cache settings
@@ -41,7 +42,9 @@ python extract_features_text.py \
     --layers 11 \
     --site post \
     --pool mean \
-    --batch_size 16
+    --batch_size 16 \
+    --num_parts 5 \
+    --part_id $SLURM_ARRAY_TASK_ID
 
 echo ""
 echo "Job finished at: $(date)"

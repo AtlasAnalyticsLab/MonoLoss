@@ -1,0 +1,6 @@
+{
+  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/clip_text_features_CLIP-ViT-L-14-DataComp_fast.lmdb",
+  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/clip_text_features_CLIP-ViT-L-14-DataComp_fast.lmdb",
+  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/clip_text_features_CLIP-ViT-L-14-DataComp_fast.lmdb"
+}
+

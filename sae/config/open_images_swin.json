@@ -1,0 +1,6 @@
+{
+  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/swin_features_swin-large-p4-w12-384_fast.lmdb",
+  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/swin_features_swin-large-p4-w12-384_fast.lmdb",
+  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/swin_features_swin-large-p4-w12-384_fast.lmdb"
+}
+

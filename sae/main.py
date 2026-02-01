@@ -82,8 +82,17 @@ def main():
     parser.add_argument('--device', type=str, default='cuda',
                        choices=['cuda', 'cpu'],
                        help='Device to use for training')
+    parser.add_argument('--skip_existing', action='store_true', default=False,
+                       help='Skip training if final checkpoint already exists')
 
     args = parser.parse_args()
+
+    # Check if checkpoint already exists (early exit if --skip_existing)
+    checkpoint_path = Path(args.output_dir) / args.exp_name / 'autoencoder_final.pt'
+    if args.skip_existing and checkpoint_path.exists():
+        print(f"Checkpoint already exists at {checkpoint_path}")
+        print("Skipping training (--skip_existing is set)")
+        return None
 
     # Load dataset paths from config
     print(f"Loading dataset paths from {args.dataset_config}")

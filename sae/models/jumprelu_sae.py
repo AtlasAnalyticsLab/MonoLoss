@@ -94,11 +94,11 @@ class JumpReLUSAE(BaseAutoencoder):
     def forward(self, x, use_pre_enc_bias=False):
         """
         Forward pass through autoencoder.
-        
+
         Args:
             x: input data (shape: [batch, n_inputs])
             use_pre_enc_bias: whether to use pre-encoder bias
-        
+
         Returns:
             pre_activations: ReLU activations before JumpReLU (shape: [batch, n_latents])
             feature_magnitudes: JumpReLU activations (shape: [batch, n_latents])
