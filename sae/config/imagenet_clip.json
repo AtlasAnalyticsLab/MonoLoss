@@ -1,5 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/train/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb",
-  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb",
-  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/clip_image_features_CLIP-ViT-L-14-DataComp.lmdb"
-}

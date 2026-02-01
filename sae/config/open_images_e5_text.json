@@ -1,6 +1,0 @@
-{
-  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/e5_text_features_e5-large-v2_fast.lmdb",
-  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/e5_text_features_e5-large-v2_fast.lmdb",
-  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/e5_text_features_e5-large-v2_fast.lmdb"
-}
-

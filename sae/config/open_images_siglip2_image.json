@@ -1,6 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/train/siglip2_image_features_siglip2-so400m-p14-384_fast.lmdb",
-  "val_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/val/siglip2_image_features_siglip2-so400m-p14-384_fast.lmdb",
-  "test_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/test/siglip2_image_features_siglip2-so400m-p14-384_fast.lmdb"
-}
-

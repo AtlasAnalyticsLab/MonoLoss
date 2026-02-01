@@ -1,5 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/train/dino_features_dinov2-large.lmdb",
-  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/dino_features_dinov2-large.lmdb",
-  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/dino_features_dinov2-large.lmdb"
-}

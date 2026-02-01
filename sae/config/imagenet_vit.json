@@ -1,5 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/train/vit_features_vit-large-p16-224.lmdb",
-  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/vit_features_vit-large-p16-224.lmdb",
-  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/vit_features_vit-large-p16-224.lmdb"
-}

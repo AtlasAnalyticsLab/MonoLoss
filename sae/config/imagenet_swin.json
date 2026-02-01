@@ -1,5 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/train/swin_features_swin-large-p4-w12-384.lmdb",
-  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/swin_features_swin-large-p4-w12-384.lmdb",
-  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/swin_features_swin-large-p4-w12-384.lmdb"
-}

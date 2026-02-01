@@ -1,6 +1,0 @@
-{
-  "train_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/train/vit_features_vit-large-p16-224_fast.lmdb",
-  "val_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/val/vit_features_vit-large-p16-224_fast.lmdb",
-  "test_path": "/home/anasiri/links/projects/rrg-msh/anasiri/MonoLoss_git/sae/features/open_images/test/vit_features_vit-large-p16-224_fast.lmdb"
-}
-
