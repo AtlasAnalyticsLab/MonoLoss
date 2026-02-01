@@ -1,0 +1,6 @@
+{
+  "train_path": "/home/a_n29343/MonoLoss/features/open_images/train/dino_features_dinov2_vitl14_reg_fast.lmdb",
+  "val_path": "/home/a_n29343/MonoLoss/features/open_images/val/dino_features_dinov2_vitl14_reg_fast.lmdb",
+  "test_path": "/home/a_n29343/MonoLoss/features/open_images/test/dino_features_dinov2_vitl14_reg_fast.lmdb"
+}
+

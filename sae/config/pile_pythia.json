@@ -1,0 +1,5 @@
+{
+  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/monology_pile_unc/pythia_410m_deduped_L11_post_mean.lmdb",
+  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/openwebtext2/pythia_410m_deduped_L11_post_mean.lmdb",
+  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/openwebtext2/pythia_410m_deduped_L11_post_mean.lmdb"
+}

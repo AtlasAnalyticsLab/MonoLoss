@@ -1,0 +1,5 @@
+{
+  "train_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/train/siglip2_image_features_siglip2-so400m-p14-384.lmdb",
+  "val_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/siglip2_image_features_siglip2-so400m-p14-384.lmdb",
+  "test_path": "/home/anasiri/links/scratch/MonoLoss_features/imagenet/validation/siglip2_image_features_siglip2-so400m-p14-384.lmdb"
+}
