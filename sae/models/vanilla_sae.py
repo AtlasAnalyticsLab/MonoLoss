@@ -57,7 +57,7 @@ class VanillaSAE(BaseAutoencoder):
             loss: Total loss scalar
             output: Dictionary of metrics for logging
         """
-        l2_loss = (recons.float() - x.float()).pow(2).mean()# / (x.float() ** 2).mean()
+        l2_loss = (recons.float() - x.float()).pow(2).mean()
         l1_norm = latents.float().abs().sum(-1).mean()
         l1_loss = self.cfg["l1_coeff"] * l1_norm
         l0_norm = (latents > 0).float().sum(-1).mean()

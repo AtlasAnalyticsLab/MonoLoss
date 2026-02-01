@@ -99,7 +99,6 @@ def main():
     with open(args.dataset_config, 'r') as f:
         config_dict = json.load(f)
     
-    # Load dataset paths from config
     args.train_path = config_dict.get('train_path', None)
     args.val_path = config_dict.get('val_path', None)
     args.test_path = config_dict.get('test_path', None)
@@ -123,7 +122,7 @@ def main():
             activation=args.activation,
             topk_k=args.topk_k,
             tied_weights=args.tied_weights,
-            normalize=True, #args.normalize,
+            normalize=True,
             batch_size=args.batch_size,
             num_epochs=args.num_epochs,
             lr=args.lr,

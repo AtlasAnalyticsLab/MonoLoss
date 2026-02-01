@@ -13,7 +13,6 @@ import numpy as np
 import wandb
 
 from dataset import LMDBFeatureDataset
-# from dataset.samplers import ContiguousBatchSampler
 from models import BatchTopKSAE, VanillaSAE, JumpReLUSAE
 from loss import compute_monosemanticity_fast
 from mono_loss import compute_monosemanticity_custom
@@ -206,21 +205,6 @@ def train_autoencoder(config: TrainingConfig):
     print(f"Feature dimension: {d_model}")
     
         
-    # # Create train dataloader with contiguous batch sampling for faster LMDB reads
-    # train_batch_sampler = ContiguousBatchSampler(
-    #     n_samples=len(train_dataset),
-    #     batch_size=config.batch_size,
-    #     drop_last=True,
-    #     shuffle=True
-    # )
-    # train_loader = DataLoader(
-    #     train_dataset,
-    #     batch_sampler=train_batch_sampler,
-    #     num_workers=config.num_workers,
-    #     pin_memory=True,
-    #     persistent_workers=config.num_workers > 0,
-    #     prefetch_factor=4 if config.num_workers > 0 else None
-    # )
     # Create train dataloader
     train_loader = DataLoader(
         train_dataset,
@@ -235,22 +219,6 @@ def train_autoencoder(config: TrainingConfig):
     mono_loader = None
     if config.mono_coef > 0 and config.mono_period > 1:
         print(f"Creating separate DataLoader for periodic mono loss computation...")
-        # mono_batch_sampler = ContiguousBatchSampler(
-        #     n_samples=len(train_dataset),
-        #     batch_size=config.batch_size,
-        #     drop_last=False,  # Include all samples
-        #     shuffle=True
-        # )
-
-        # mono_loader = DataLoader(
-        #     train_dataset,
-        #     batch_sampler=mono_batch_sampler,
-        #     num_workers=config.num_workers,
-        #     pin_memory=True,
-        #     persistent_workers=config.num_workers > 0,
-        #     prefetch_factor=4 if config.num_workers > 0 else None
-        # )
-    
         mono_loader = DataLoader(
             train_dataset,
             batch_size=config.batch_size,
@@ -266,22 +234,6 @@ def train_autoencoder(config: TrainingConfig):
     if config.val_path:
         print(f"Loading val dataset from {config.val_path}...")
         val_dataset = LMDBFeatureDataset(config.val_path, return_index=False, verbose=False)
-        
-        # val_batch_sampler = ContiguousBatchSampler(
-        #     n_samples=len(val_dataset),
-        #     batch_size=config.batch_size,
-        #     drop_last=False,
-        #     shuffle=False  # Sequential for evaluation
-        # )
-
-        # val_loader = DataLoader(
-        #     val_dataset,
-        #     batch_sampler=val_batch_sampler,
-        #     num_workers=config.num_workers,
-        #     pin_memory=True,
-        #     persistent_workers=config.num_workers > 0,
-        #     prefetch_factor=4 if config.num_workers > 0 else None
-        # )
         val_loader = DataLoader(
             val_dataset,
             batch_size=config.batch_size,
@@ -297,22 +249,6 @@ def train_autoencoder(config: TrainingConfig):
     if config.test_path:
         print(f"Loading test dataset from {config.test_path}...")
         test_dataset = LMDBFeatureDataset(config.test_path, return_index=False, verbose=False)
-        
-        # test_batch_sampler = ContiguousBatchSampler(
-        #     n_samples=len(test_dataset),
-        #     batch_size=config.batch_size,
-        #     drop_last=False,
-        #     shuffle=False  # Sequential for evaluation
-        # )
-
-        # test_loader = DataLoader(
-        #     test_dataset,
-        #     batch_sampler=test_batch_sampler,
-        #     num_workers=config.num_workers,
-        #     pin_memory=True,
-        #     persistent_workers=config.num_workers > 0,
-        #     prefetch_factor=4 if config.num_workers > 0 else None
-        # )
         test_loader = DataLoader(
             test_dataset,
             batch_size=config.batch_size,
@@ -480,17 +416,6 @@ def train_autoencoder(config: TrainingConfig):
         avg_active = epoch_active / num_batches
 
         print(f"Epoch {epoch+1}/{config.num_epochs} - Train Loss: {avg_loss:.4e}, Train L2: {avg_l2:.4e}, Train Active: {avg_active:.1f}")
-
-        # # Save checkpoint immediately after training (before evaluations)
-        # checkpoint_path = Path(config.output_dir) / f'autoencoder_epoch{epoch+1}.pt'
-        # torch.save({
-        #     'epoch': epoch + 1,
-        #     'step': global_step,
-        #     'model_state_dict': autoencoder.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict(),
-        #     'config': vars(config),
-        # }, checkpoint_path)
-        # print(f"Checkpoint saved to {checkpoint_path}")
 
         # Validation at end of epoch
         if val_loader:

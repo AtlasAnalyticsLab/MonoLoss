@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 from .base import BaseAutoencoder
 from loss import compute_monosemanticity_loss_batch
-# from loss_other import compute_monosemanticity_loss_batch
 
 class BatchTopKSAE(BaseAutoencoder):
     def __init__(self, cfg):
