@@ -3,7 +3,7 @@
 Official implementation of **MonoLoss**, a plug-and-play training objective that directly rewards semantically consistent activations for learning interpretable monosemantic representations in Sparse Autoencoders (SAEs).
 
 <p align="center">
-  <img src="media/MonoLoss.png" width="600">
+  <img src="media/MonoLoss.png" width="400">
 </p>
 
 ## Abstract
@@ -28,7 +28,10 @@ This allows us to treat MonoScore as a training signal: we introduce **MonoLoss*
 - `compute_monosemanticity_loss_batch()` — batch-level training loss
 - `compute_monosemanticity_ref()` — quadratic O(N²) reference
 
-![Speedup](media/monoscore_time_comparison_h100.png)
+
+<p align="center">
+  <img src="media/monoscore_time_comparison_h100.png" width="400">
+</p>
 
 ## Installation
 
