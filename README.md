@@ -14,24 +14,33 @@ We study a recent MonoScore metric and derive a **single-pass algorithm** that c
 
 This allows us to treat MonoScore as a training signal: we introduce **MonoLoss**, a plug-in objective that directly rewards semantically consistent activations. Across SAEs trained on CLIP, SigLIP2, and pretrained ViT features, using BatchTopK, TopK, and JumpReLU SAEs, MonoLoss increases MonoScore for most latents and consistently improves class purity across all encoder and SAE combinations.
 
+Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, MonoLoss yields up to **0.6\% accuracy gains on ImageNet-1K** and **monosemantic activating patterns** on standard benchmark datasets.
+
 ## Key Results
 
+### Consistent gain on Monosemanticity
 ![Results](media/comparison_mono_loss_combined.png)
 
-- **Improved monosemanticity**: Consistent MonoScore gains across all encoder-SAE combinations
-- **Higher class purity**: Largest gain raises baseline purity from 0.152 to 0.723
+### Higher class purity
+![Results2](media/purity.png)
 
-### Linear-Time MonoScore
+### Linear-Time Calculation for MonoScore
 
 **~1200× speedup** at 50k samples, growing with dataset size. See [`sae/loss.py`](sae/loss.py):
 - `compute_monosemanticity_fast()` — linear-time O(N) evaluation
 - `compute_monosemanticity_loss_batch()` — batch-level training loss
 - `compute_monosemanticity_ref()` — quadratic O(N²) reference
 
-
 <p align="center">
   <img src="media/monoscore_time_comparison_h100.png" width="400">
 </p>
+
+
+### Higher finetuning performance
+<p align="center">
+  <img src="media/finetuning_acc.png" width="400">
+</p>
+
 
 ## Installation
 
@@ -46,17 +55,18 @@ pip install -r requirements.txt
 ```
 MonoLoss/
 ├── sae/                        # SAE training with MonoLoss (see sae/README.md)
-├── finetuning/                 # Vision model finetuning (coming soon)
+├── finetuning/                 # Vision model finetuning (see finetuning/README.md)
 ```
 
 ## Usage
 
+### SAE training
 See [`sae/README.md`](sae/README.md) for detailed instructions on:
 - Feature extraction from CLIP, SigLIP2, and ViT encoders
 - Training SAEs (BatchTopK, TopK, JumpReLU, Vanilla) with MonoLoss
 - Reproducing paper experiments
 
-**Quick example:**
+**Example:**
 ```bash
 cd sae
 
@@ -65,6 +75,24 @@ python main.py --dataset_config config/imagenet_clip.json --model batch_topk --m
 
 # Train with MonoLoss
 python main.py --dataset_config config/imagenet_clip.json --model batch_topk --mono_coef 0.0003
+```
+
+### Vision finetuning
+See [`finetuning/README.md`](finetuning/README.md) for detailed instructions on:
+- Downloading pre-extracted CLIP-ViT-L/14 features for calculating similarities.
+- Finetuning recipes for ResNet50 and CLIP-ViT-B/32 on ImageNet-1K, CIFAR-10, and CIFAR-100.
+
+**Example:**
+```bash
+BASE_PORT=29650
+i=0
+
+# Finetuning ResNet on ImageNet-1K with multiple lambda values (0.0 is the baseline setting)
+for lam in 0.0 0.03 0.05 0.07 0.1; do
+  port=$((BASE_PORT + i))
+  i=$((i + 1))
+  sh scripts/imagenet/resnet.sh "${port}" "${lam}"
+done
 ```
 
 ## Citation
