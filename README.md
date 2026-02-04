@@ -42,6 +42,15 @@ Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, 
 </p>
 
 
+### Monosemantic activation patterns
+<p align="center">
+  <img src="media/activating_imgs_sae.png">
+</p>
+
+<p align="center">
+  <img src="media/activating_imgs_finetuning.png" width="790">
+</p>
+
 ## Installation
 
 ```bash
