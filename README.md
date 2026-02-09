@@ -20,9 +20,11 @@ Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, 
 
 ### Consistent gain on Monosemanticity
 ![Results](media/comparison_mono_loss_combined.png)
+*MonoLoss consistently raises monosemanticity across nearly all configuration*
 
 ### Higher class purity
 ![Results2](media/purity.png)
+*MonoLoss increases purity in all 12 settings for both binary purity and weighted purity*
 
 ### Linear-Time Calculation for MonoScore
 
@@ -33,22 +35,26 @@ Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, 
 
 <p align="center">
   <img src="media/monoscore_time_comparison_h100.png" width="400">
+  <em>Our linear implementation makes large-scale evaluation feasible</em>
 </p>
 
 
 ### Higher finetuning performance
 <p align="center">
   <img src="media/finetuning_acc.png" width="400">
+  <em>Adding MonoLoss yields consistent performance gains on both ResNet-50 and CLIP-ViT-B/32 and all datasets (ImageNet-1k, CIFAR-10, and CIFAR-100)</em>
 </p>
 
 
 ### Monosemantic activation patterns
 <p align="center">
   <img src="media/activating_imgs_sae.png">
+  <em>MonoLoss provide better class purity qualitatively for SAE activations</em>
 </p>
 
 <p align="center">
   <img src="media/activating_imgs_finetuning.png" width="790">
+  <em>MonoLoss provide better class purity qualitatively for finetuned vision model activations</em>
 </p>
 
 ## Installation
@@ -109,7 +115,7 @@ done
 
 ## License
 
-[Add license information]
+This project, MonoLoss, is licensed under the **CC BY-NC 4.0** license. This means you are free to share and adapt the material for non-commercial purposes, provided you give appropriate credit to the original author(s) and indicate if changes were made. For any commercial use or licensing inquiries, please contact the repository owner directly.
 
 ## Acknowledgments
 
