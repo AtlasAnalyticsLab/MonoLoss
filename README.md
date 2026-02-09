@@ -127,5 +127,4 @@ done
 This project, MonoLoss, is licensed under the **CC BY-NC 4.0** license. This means you are free to share and adapt the material for non-commercial purposes, provided you give appropriate credit to the original author(s) and indicate if changes were made. For any commercial use or licensing inquiries, please contact the repository owner directly.
 
 ## Acknowledgments
-
-[Add acknowledgments]
+Our framework is based on [OpenAI's SAE repo](https://github.com/openai/sparse_autoencoder), [BatchTopK SAE](https://github.com/bartbussmann/BatchTopK/), [SPARC](https://github.com/AtlasAnalyticsLab/SPARC/), [torchvision](https://github.com/pytorch/vision/tree/main/references/classification), and [MonoScore](https://github.com/ExplainableML/sae-for-vlm). Thanks for their outstanding code.
