@@ -42,7 +42,7 @@ Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, 
 <p align="center">
   <img src="media/monoscore_time_comparison_h100.png" width="400">
   <br>
-  <em>Our linear implementation makes large-scale evaluation feasible</em>
+  <em>Our linear implementation makes large-scale evaluation feasible.</em>
 </p>
 
 
@@ -50,20 +50,20 @@ Used as an auxiliary regularizer during ResNet-50 and CLIP-ViT-B/32 finetuning, 
 <p align="center">
   <img src="media/finetuning_acc.png" width="400">
   <br>
-  <em>Adding MonoLoss yields consistent performance gains on both ResNet-50 and CLIP-ViT-B/32 and all datasets (ImageNet-1k, CIFAR-10, and CIFAR-100)</em>
+  <em>Adding MonoLoss yields consistent performance gains on both ResNet-50 and CLIP-ViT-B/32 and all datasets (ImageNet-1k, CIFAR-10, and CIFAR-100).</em>
 </p>
 
 
 ### Monosemantic activation patterns
 <p align="center">
   <img src="media/activating_imgs_sae.png">
-  <em>MonoLoss provide better class purity qualitatively for SAE activations</em>
+  <em>MonoLoss provide better class purity qualitatively for SAE activations.</em>
 </p>
 
 <p align="center">
   <img src="media/activating_imgs_finetuning.png" width="790">
   <br>
-  <em>MonoLoss provide better class purity qualitatively for finetuned vision model activations</em>
+  <em>MonoLoss provide better class purity qualitatively for finetuned vision model activations.</em>
 </p>
 
 ## Installation
