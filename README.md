@@ -120,7 +120,17 @@ done
 ```
 
 ## Citation
-
+```
+@misc{nasirisarvi2026monoloss,
+      title={MonoLoss: A Training Objective for Interpretable Monosemantic Representations}, 
+      author={Ali Nasiri-Sarvi and Anh Tien Nguyen and Hassan Rivaz and Dimitris Samaras and Mahdi S. Hosseini},
+      year={2026},
+      eprint={2602.12403},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2602.12403}, 
+}
+```
 
 ## License
 
