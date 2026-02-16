@@ -6,6 +6,12 @@ Official implementation of **MonoLoss**, a plug-and-play training objective that
   <img src="media/MonoLoss.png" width="400">
 </p>
 
+<div align ="center">
+  
+  [![arxiv paper](https://img.shields.io/badge/arXiv-Paper-red)](https://arxiv.org/abs/2602.12403)
+  
+</div>
+
 ## Abstract
 
 Sparse autoencoders (SAEs) decompose polysemantic neural representations, where neurons respond to multiple unrelated concepts, into monosemantic features that capture single, interpretable concepts. However, standard training objectives only weakly encourage this decomposition, and existing monosemanticity metrics require pairwise comparisons across all dataset samples, making them inefficient during training and evaluation.
